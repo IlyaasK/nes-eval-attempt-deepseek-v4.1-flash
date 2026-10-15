@@ -44,6 +44,9 @@ fn main() {
             "--palette" => {
                 i += 1;
             }
+            "--ppustate" => {
+                i += 1;
+            }
             "--bench" => {
                 bench = true;
                 i += 1;
@@ -84,6 +87,32 @@ fn main() {
             }
         }
         sys.out.clear();
+        if std::env::args().any(|a| a == "--ppustate") {
+            let nt = sys.mapper.chr_read(0);
+            let nz_vram = sys.ppu.vram.iter().filter(|&&b| b != 0).count();
+            let mut nz_chr = 0;
+            for a in 0..0x2000 { if sys.mapper.chr_read(a) != 0 { nz_chr += 1; } }
+            let nz_oam = sys.ppu.oam.iter().filter(|&&b| b != 0).count();
+            let mut s0 = String::new();
+            for j in 0..16 { s0.push_str(&format!("{:02X} ", sys.ppu.vram[j])); }
+            let mut s1 = String::new();
+            for j in 0..16 { s1.push_str(&format!("{:02X} ", sys.ppu.vram[1024+j])); }
+            eprintln!("frame {}: ctrl={:02X} mask={:02X} v={:04X} sl={} | NT0: {} | NT1: {} | chr0={:02X}",
+                f, sys.ppu.ctrl, sys.ppu.mask, sys.ppu.v, sys.ppu.scanline, s0, s1, nt);
+            let mut oamstr = String::new();
+            for j in 0..32 { oamstr.push_str(&format!("{:02X} ", sys.ppu.oam[j])); }
+            eprintln!("    nonzero: vram={} chr={} oam={}", nz_vram, nz_chr, nz_oam);
+            eprintln!("    OAM[0..32]: {}", oamstr);
+            let mut nt = String::new();
+            for j in 832..864 { nt.push_str(&format!("{:02X} ", sys.ppu.vram[j])); }
+            eprintln!("    NT row26: {}", nt);
+            let mut chrt = String::new();
+            for j in (0xFD0)..(0xFD0+16) { chrt.push_str(&format!("{:02X} ", sys.mapper.chr_read(j))); }
+            eprintln!("    CHR tile FD: {}", chrt);
+            let mut chrt2 = String::new();
+            for j in (0x0000)..(0x0010) { chrt2.push_str(&format!("{:02X} ", sys.mapper.chr_read(j))); }
+            eprintln!("    CHR tile 00: {}", chrt2);
+        }
         if std::env::args().any(|a| a == "--palette") {
             eprintln!("frame {}: pal0={:02X} {:02X} {:02X} {:02X} v={:04X} mask={:02X} fb[0]={:04X}",
                 f, sys.ppu.palette[0], sys.ppu.palette[1], sys.ppu.palette[2], sys.ppu.palette[3],

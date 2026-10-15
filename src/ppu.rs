@@ -252,7 +252,7 @@ impl Ppu {
         match addr & 7 {
             2 => {
                 let mut result = (self.status & 0xE0) | (self.open_bus & 0x1F);
-                if (self.scanline == 240 && self.dot == 340) {
+                if (self.scanline == 241 && self.dot == 0) {
                     // One PPU clock before the VBL set: this read suppresses the
                     // flag for this frame (and the NMI is not generated).
                     self.vbl_suppress = true;

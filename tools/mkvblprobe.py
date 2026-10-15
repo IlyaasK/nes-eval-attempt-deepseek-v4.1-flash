@@ -21,26 +21,36 @@ def build(burn: int, origin=0xC000) -> bytes:
 
     emit(b"\x78\xd8\xa2\xff\x9a")
     emit(b"\xa9\x00\x8d\x00\x20\x8d\x01\x20")
-    # Burn `burn` cycles: 5*k iterations of dex/bne plus a tail of NOPs and
-    # 3-cycle loads (to cover all residues mod 5).
-    k = burn // 5
-    tail = burn - 5 * k
-    # tail: use nops (2 cycles) and one 3-cycle lda to hit any residue
+    # Burn `burn` cycles: outer loop over 1280-cycle blocks (inner 256x(dex/bne)),
+    # then 5-cycle iterations, then a tail of NOPs (2) / lda (3) for residues.
+    blocks = burn // 1280
+    rest = burn - 1280 * blocks
+    k = rest // 5
+    tail = rest - 5 * k
     tail_instr = []
     if tail % 2 == 1:
         tail_instr.append(b"\xa5\x10")       # lda $10 : 3 cycles
         tail -= 3
     tail_instr.append(b"\xea" * (tail // 2))
+    if blocks > 0:
+        if blocks > 255:
+            raise SystemExit("burn too large")
+        emit(b"\xa9" + bytes([blocks]))       # lda #blocks
+        emit(b"\x85\x12")                    # sta $12
+        outer = len(code)
+        emit(b"\xa2\x00")                    # ldx #0
+        inner = len(code)
+        emit(b"\xca"); bne(inner)
+        emit(b"\xc6\x12")                    # dec $12
+        bne(outer)
     if k > 0:
         emit(b"\xa2" + bytes([k & 0xFF]))
-        if k > 255:
-            raise SystemExit("burn too large")
         top = len(code)
         emit(b"\xca"); bne(top)              # 5 cycles per iteration
     for ins in tail_instr:
         emit(ins)
-    # probe read
-    emit(b"\x2c\x02\x20")                    # bit $2002
+    # probe read (a distinctive instruction so it can be traced)
+    emit(b"\xad\x02\x20")                    # lda $2002
     # poll until bit 7 set, counting in X (cap 255)
     emit(b"\xa2\x00")                        # ldx #0
     poll = len(code)
