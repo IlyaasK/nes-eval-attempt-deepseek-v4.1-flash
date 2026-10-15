@@ -269,21 +269,12 @@ impl Ppu {
                         eprintln!("$2002 read sl={} dot={} status={:02X}", self.scanline, self.dot, self.status);
                     }
                 }
-                // A read within a few PPU clocks before the VBL set kills the NMI
-                // for this frame (the line pulse is too short for the CPU's edge
-                // detector to see it).
-                if (self.scanline == 240 && self.dot >= 336) || (self.scanline == 241 && self.dot == 0) { self.nmi_suppress = true; }
-                if (self.scanline == 241 && self.dot == 0) {
-                    // One PPU clock before the VBL set: this read suppresses the
-                    // flag for this frame (and the NMI is not generated).
+                // A read exactly one PPU clock before the VBL set suppresses the
+                // flag for the whole frame (and the NMI is not generated).
+                if self.scanline == 240 && self.dot == 340 {
                     self.vbl_suppress = true;
+                    self.nmi_suppress = true;
                     result &= 0x7F;
-                    #[cfg(feature = "trace")]
-                    {
-                        if std::env::var("TRACE_VBL").is_ok() {
-                            eprintln!("VBL suppressed by $2002 read at cycle {}", 0);
-                        }
-                    }
                 }
                 self.status &= !0x80;
                 self.w = false;
@@ -401,7 +392,7 @@ impl Ppu {
             mapper.ppu_dot(a);
         }
 
-        if sl == 241 && dot == 1 {
+        if sl == 241 && dot == 0 {
             if !self.vbl_suppress {
                 self.status |= 0x80;
             }

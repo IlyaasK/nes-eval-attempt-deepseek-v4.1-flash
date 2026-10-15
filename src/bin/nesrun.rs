@@ -50,6 +50,9 @@ fn main() {
             "--prgram" => {
                 i += 1;
             }
+            "--pal16" => {
+                i += 1;
+            }
             "--audio-debug" => {
                 i += 1;
             }
@@ -137,6 +140,11 @@ fn main() {
             let mut chrt2 = String::new();
             for j in (0x0000)..(0x0010) { chrt2.push_str(&format!("{:02X} ", sys.mapper.chr_read(j))); }
             eprintln!("    CHR tile 00: {}", chrt2);
+        }
+        if std::env::args().any(|a| a == "--pal16") {
+            let mut t=String::new();
+            for j in 0..32 { t.push_str(&format!("{:02X} ", sys.ppu.palette[j])); }
+            eprintln!("frame {}: palette {}", f, t);
         }
         if std::env::args().any(|a| a == "--palette") {
             eprintln!("frame {}: pal0={:02X} {:02X} {:02X} {:02X} v={:04X} mask={:02X} fb[0]={:04X}",
