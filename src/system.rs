@@ -529,7 +529,9 @@ impl System {
                 if addr == 0x2007 {
                     eprintln!("W 2007 <- {:02X} @{} v={:04X} mask={:02X} sl={} dot={}", val, self.cycles, self.ppu.v, self.ppu.mask, self.ppu.scanline, self.ppu.dot);
                 } else {
-                    eprintln!("W {:04X} <- {:02X} @{} sl={} dot={} mask={:02X} pc={:04X}", addr, val, self.cycles, self.ppu.scanline, self.ppu.dot, self.ppu.mask, self.cpu.pc);
+                    eprintln!("W {:04X} <- {:02X} @{} sl={} dot={} mask={:02X} pc={:04X} t={:04X} v={:04X} w={} fx={}",
+                        addr, val, self.cycles, self.ppu.scanline, self.ppu.dot, self.ppu.mask, self.cpu.pc,
+                        self.ppu.t, self.ppu.v, self.ppu.w, self.ppu.fine_x);
                 }
             }
         }

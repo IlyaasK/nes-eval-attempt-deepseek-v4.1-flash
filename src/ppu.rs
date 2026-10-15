@@ -14,6 +14,11 @@
 use crate::ines::*;
 use crate::mapper::Mapper;
 
+#[cfg(feature = "trace")]
+fn trace_scanline() -> u16 {
+    std::env::var("TRACE_SL").ok().and_then(|v| v.parse().ok()).unwrap_or(18)
+}
+
 /// Delay before a register write reaches the PPU (in dots).
 static mut REG_DELAY: u64 = 2;
 #[cfg(feature = "trace")]
@@ -659,12 +664,16 @@ impl Ppu {
             }
             5 => {
                 if !self.w {
+                    // First write: X scroll -> fine X and coarse X.
                     self.fine_x = val & 0x07;
                     self.t = (self.t & 0x7FE0) | ((val as u16) >> 3);
                     self.w = true;
                 } else {
-                    self.t = (self.t & 0x0C1F) | (((val as u16) & 0x07) << 12);
-                    self.t = (self.t & 0x7FE0) | ((val as u16) >> 3);
+                    // Second write: Y scroll -> coarse Y (bits 5-9) and fine Y
+                    // (bits 12-14).  The X and nametable bits are preserved.
+                    self.t = (self.t & 0x0C1F)
+                        | (((val as u16) & 0x07) << 12)
+                        | (((val as u16) & 0xF8) << 2);
                     self.w = false;
                 }
             }
@@ -1188,6 +1197,20 @@ impl Ppu {
             sprite0_opaque = false;
         }
 
+        #[cfg(feature = "trace")]
+        {
+            if std::env::var("TRACE_BG").is_ok()
+                && self.scanline == trace_scanline()
+                && self.dot >= 80
+                && self.dot < 120
+            {
+                eprintln!(
+                    "bg sl={} dot={} x={} latch={:02X}/{:02X} nt={:02X} v={:04X} t={:04X} finex={} px={}",
+                    self.scanline, self.dot, x,
+                    self.bg_latch_lo, self.bg_latch_hi, self.bg_latch_nt, self.v, self.t, self.fine_x, bg_pixel
+                );
+            }
+        }
         // ------------------------------------------------------- compose ---
         #[cfg(feature = "trace")]
         if sp_pixel != 0 {
