@@ -76,7 +76,7 @@ fn lp_coef(hz: f64) -> f64 {
     dt / (rc + dt)
 }
 
-/// How many consecutive PPU dots the NMI line must be high before the CPU's
+/// How many consecutive samples the NMI line must be high before the CPU's
 /// edge detector latches an interrupt.
 static mut NMI_LATCH_DOTS: u32 = 1;
 #[cfg(feature = "trace")]
@@ -93,6 +93,24 @@ fn nmi_latch_dots() -> u32 {
 #[cfg(not(feature = "trace"))]
 fn nmi_latch_dots() -> u32 {
     unsafe { NMI_LATCH_DOTS }
+}
+
+/// Which dot of the three-dot CPU cycle samples the NMI line (0, 1, or 2).
+static mut NMI_SAMPLE_PHASE: u32 = 2;
+#[cfg(feature = "trace")]
+fn nmi_sample_phase() -> u32 {
+    unsafe {
+        if let Ok(v) = std::env::var("NMI_PHASE") {
+            if let Ok(n) = v.parse::<u32>() {
+                NMI_SAMPLE_PHASE = n;
+            }
+        }
+        NMI_SAMPLE_PHASE
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn nmi_sample_phase() -> u32 {
+    unsafe { NMI_SAMPLE_PHASE }
 }
 
 /// PPU dots clocked before the CPU's bus access inside its CPU cycle.
@@ -281,26 +299,35 @@ impl System {
         // access dot; a $2002 read on that dot (or one that clears the vblank
         // flag before it) hides the edge, which is why reads a dot or two after
         // the flag set suppress the NMI.
-        if access.is_some() {
-            let line = self.ppu.nmi_line();
-            if line {
-                self.nmi_high_dots = self.nmi_high_dots.saturating_add(1);
-                if self.nmi_high_dots == nmi_latch_dots() {
-                    self.nmi_latch = true;
-                }
-            } else {
-                self.nmi_high_dots = 0;
-            }
-            self.prev_nmi = line;
-        }
         self.ppu.advance();
         result
+    }
+
+    /// Sample the PPU's NMI line at one point of the CPU cycle: it is high
+    /// while the vblank flag and the NMI enable are both set, and the CPU
+    /// latches on a rising edge.
+    #[inline]
+    fn sample_nmi(&mut self) {
+        let line = self.ppu.nmi_line();
+        if line {
+            self.nmi_high_dots = self.nmi_high_dots.saturating_add(1);
+            if self.nmi_high_dots == nmi_latch_dots() {
+                self.nmi_latch = true;
+            }
+        } else {
+            self.nmi_high_dots = 0;
+        }
+        self.prev_nmi = line;
     }
 
     /// A single CPU cycle without any of the DMA handling.
     #[inline]
     fn raw_cycle(&mut self, access: Option<Access>) -> u8 {
+        let phase = nmi_sample_phase();
         let v = self.clock_dot(access);
+        if phase == ACCESS_PHASE {
+            self.sample_nmi();
+        }
         // The IRQ input is level-sensitive.  The CPU polls it during the
         // cycle before an instruction's last cycle, so the state latched here
         // is one cycle old when the instruction ends; that reproduces the
@@ -312,8 +339,11 @@ impl System {
         self.irq_prev_i = !self.cpu.flag(crate::cpu::FLAG_I);
 
         self.apu.clock(self.cycles);
-        for _ in 0..(2u32.saturating_sub(ACCESS_PHASE)) {
+        for i in 0..(2u32.saturating_sub(ACCESS_PHASE)) {
             self.clock_dot(None);
+            if ACCESS_PHASE + 1 + i == phase {
+                self.sample_nmi();
+            }
         }
         self.cycles += 1;
         self.audio_tick();
@@ -328,8 +358,14 @@ impl System {
         }
         // Number of PPU dots clocked *before* the CPU's bus access within its
         // CPU cycle (the CPU/PPU sub-cycle alignment).
-        for _ in 0..ACCESS_PHASE {
-            self.clock_dot(None);
+        {
+            let phase = nmi_sample_phase();
+            for i in 0..ACCESS_PHASE {
+                self.clock_dot(None);
+                if i == phase {
+                    self.sample_nmi();
+                }
+            }
         }
         // A pending DMC DMA halts the CPU, but only on read cycles.
         let can_halt = match access {
@@ -366,8 +402,14 @@ impl System {
     /// A cycle stolen by DMA: the CPU bus access is replaced by the DMA access.
     #[inline]
     fn dma_cycle(&mut self, access: Option<Access>) -> u8 {
-        for _ in 0..ACCESS_PHASE {
-            self.clock_dot(None);
+        {
+            let phase = nmi_sample_phase();
+            for i in 0..ACCESS_PHASE {
+                self.clock_dot(None);
+                if i == phase {
+                    self.sample_nmi();
+                }
+            }
         }
         let v = self.clock_dot(access);
         self.apu.clock(self.cycles);

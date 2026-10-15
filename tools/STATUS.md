@@ -75,3 +75,28 @@ and stallar stay within a few hundred pixels over 300 frames).
 Individual channel probes (pulse, triangle, noise with both LFSR modes, DMC DAC
 level, envelope decay, sweep, multi-channel sum) all match at 99.3% or better;
 per-frame sample counts match the reference (0, then 733-734 per frame).
+
+## Open bus / decay register (2026-10-15 later)
+* The PPU's open-bus ("decay") register holds the **whole byte** a write put on
+  the PPU bus, not just bits 0-4: `ppu_open_bus` compares `$2000` reads against
+  the exact byte written to `$2002`/`$2004`/`$2006`.
+* It is refreshed by: writes to `$2000-$3FFF`, `$2007` reads (VRAM reads put the
+  returned byte, palette reads the palette value in the low 5 bits), and `$2004`
+  reads (attribute bytes mask bits 2-4 to 0 first).
+* `$2002` reads return `(status & 0xE0) | (decay & 0x1F)` and do *not* refresh it.
+* It decays to 0 about 0.56 s after the last refresh (measured against the
+  reference: still set at 0.55 s, cleared at 0.57 s).  `DECAY_DOTS` overrides.
+* With this, `ppu_open_bus.nes` passes.
+
+## NMI sampling
+* The NMI line is sampled once per CPU cycle; `NMI_PHASE` selects which of the
+  three PPU dots of the cycle samples it (0, 1 or 2), `NMI_LATCH_DOTS` how many
+  consecutive high samples latch it.
+* `ppu_vbl_nmi__02/03/04/09` pass; 06/07/08 fail on entries that differ by a
+  dot or two of edge-recognition timing (the sweep table in /tmp/nmisweep.py
+  shows no (phase, latch) combination passes all three).
+
+## MMC3 A12
+* Sprite pattern fetches on dots 4 and 6 of the sprite fetch group also put
+  their address on the PPU bus; the MMC3 watches A12 for IRQ clocking, so
+  skipping those two dummy reads moved every A12 rise one dot late.

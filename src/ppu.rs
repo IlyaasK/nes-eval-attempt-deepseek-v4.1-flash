@@ -89,6 +89,24 @@ fn vbl_set_dot() -> u16 {
     unsafe { VBL_SET_DOT }
 }
 
+/// Dot of scanline 261 on which an odd frame's skip is decided.
+static mut ODD_SKIP_DOT: u16 = 339;
+#[cfg(feature = "trace")]
+fn odd_skip_dot() -> u16 {
+    unsafe {
+        if let Ok(v) = std::env::var("ODD_SKIP_DOT") {
+            if let Ok(n) = v.parse::<u16>() {
+                ODD_SKIP_DOT = n;
+            }
+        }
+        ODD_SKIP_DOT
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn odd_skip_dot() -> u16 {
+    unsafe { ODD_SKIP_DOT }
+}
+
 /// Dot of scanline 261 on which the vblank and sprite flags are cleared.
 static mut VBL_CLEAR_DOT: u16 = 0;
 #[cfg(feature = "trace")]
@@ -856,8 +874,11 @@ impl Ppu {
                             }
                         }
                         4 => {
+                            // The low bitplane's first fetch: the value is not
+                            // used yet, but the address is on the bus (mappers
+                            // like the MMC3 watch A12).
                             let (a, _) = self.sprite_pattern_addr(idx, mapper);
-                            let _ = a;
+                            let _ = self.vram_read(a, mapper);
                         }
                         5 => {
                             let (a, _) = self.sprite_pattern_addr(idx, mapper);
@@ -873,7 +894,7 @@ impl Ppu {
                         }
                         6 => {
                             let (a, _) = self.sprite_pattern_addr(idx, mapper);
-                            let _ = a;
+                            let _ = self.vram_read(a, mapper);
                         }
                         _ => {
                             let (a, _) = self.sprite_pattern_addr(idx, mapper);
@@ -1335,9 +1356,9 @@ impl Ppu {
                 self.frame_complete = true;
             }
         } else if self.scanline == 261
-            && self.rendering_enabled()
             && self.odd_frame
-            && self.dot == 340
+            && self.dot == odd_skip_dot()
+            && self.rendering_enabled()
         {
             // Odd frames skip the last dot of the pre-render scanline.
             self.dot = 0;
