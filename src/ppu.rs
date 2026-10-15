@@ -16,7 +16,25 @@ use crate::mapper::Mapper;
 
 /// Which PPU dot a $2002 read suppresses the vblank set on:
 /// bit 0 = the dot before the set (240,340), bit 1 = the set dot (241,0).
-static mut VBL_SUPPRESS_MODE: u32 = 1;
+static mut VBL_SUPPRESS_MODE: u32 = 16;
+/// Dot of scanline 241 on which the vblank flag is set (the documentation's
+/// dot 1; reads on the dot before it clear and drop the flag).
+static mut VBL_SET_DOT: u16 = 1;
+#[cfg(feature = "trace")]
+fn vbl_set_dot() -> u16 {
+    unsafe {
+        if let Ok(v) = std::env::var("VBL_SET_DOT") {
+            if let Ok(n) = v.parse::<u16>() {
+                VBL_SET_DOT = n;
+            }
+        }
+        VBL_SET_DOT
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn vbl_set_dot() -> u16 {
+    unsafe { VBL_SET_DOT }
+}
 fn vbl_suppress_mode() -> u32 {
     unsafe {
         #[cfg(feature = "trace")]
@@ -283,8 +301,16 @@ impl Ppu {
                 #[cfg(feature = "trace")]
                 {
                     if std::env::var("TRACE_RD2002").is_ok() {
-                        eprintln!("$2002 read sl={} dot={} status={:02X}", self.scanline, self.dot, self.status);
+                        eprintln!("$2002 read f={} sl={} dot={} status={:02X}", self.frame, self.scanline, self.dot, self.status);
                     }
+                }
+                if vbl_suppress_mode() & 16 != 0
+                    && self.scanline == 241
+                    && (1..=6).contains(&self.dot)
+                {
+                    // Reads just after the vblank set suppress the NMI without
+                    // affecting the flag itself.
+                    self.nmi_suppress = true;
                 }
                 // A read exactly one PPU clock before the VBL set suppresses the
                 // flag for the whole frame (and the NMI is not generated).
@@ -293,7 +319,28 @@ impl Ppu {
                     self.nmi_suppress = true;
                     result &= 0x7F;
                 }
+                if (vbl_suppress_mode() & 16 != 0)
+                    && self.scanline == 241
+                    && self.dot + 1 == vbl_set_dot()
+                {
+                    #[cfg(feature = "trace")]
+                    {
+                        if std::env::var("TRACE_SUPPRESS").is_ok() {
+                            eprintln!("vbl suppressed at sl=241 dot={}", self.dot);
+                        }
+                    }
+                    self.vbl_suppress = true;
+                    self.nmi_suppress = true;
+                    self.status &= !0x80;
+                    return result & 0x7F;
+                }
                 if self.scanline == 241 && self.dot == 0 && vbl_suppress_mode() & 2 != 0 {
+                    #[cfg(feature = "trace")]
+                    {
+                        if std::env::var("TRACE_SUPPRESS").is_ok() {
+                            eprintln!("vbl suppressed (mode2)");
+                        }
+                    }
                     self.status &= !0x80;
                     self.nmi_suppress = true;
                     result &= 0x7F;
@@ -414,10 +461,13 @@ impl Ppu {
             mapper.ppu_dot(a);
         }
 
-        if sl == 241 && dot == 0 {
+        if sl == 241 && dot == vbl_set_dot() {
             if !self.vbl_suppress {
                 self.status |= 0x80;
             }
+            self.vbl_suppress = false;
+        }
+        if vbl_set_dot() != 0 && sl == 241 && dot == 0 {
             self.vbl_suppress = false;
         }
         if sl == 261 && dot == 0 {
@@ -850,7 +900,7 @@ impl Ppu {
                     #[cfg(feature = "trace")]
                     {
                         if std::env::var("TRACE_OVF").is_ok() {
-                            eprintln!("overflow set sl={} n={} m={} addr={:02X} v={:02X}", self.scanline, self.ev_n, self.ev_m, addr, v);
+                            eprintln!("overflow set f={} sl={} n={} m={} addr={:02X} v={:02X} sprcnt={}", self.frame, self.scanline, self.ev_n, self.ev_m, addr, v, self.sprite_count);
                         }
                     }
                     self.status |= 0x20;

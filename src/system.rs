@@ -110,7 +110,8 @@ pub struct System {
     /// The reference's first `emu_run_frame` call returns without emulating
     /// anything, which shifts every subsequent frame boundary by one frame.
     first_frame: bool,
-    #[cfg(feature = "trace")]
+    pub hist_enabled: bool,
+    pub pcwatch: u64,
     pub hist: Vec<u16>,
 
     // Audio output
@@ -146,7 +147,8 @@ impl System {
             oam_dma: None,
             halt_addr: 0,
             first_frame: true,
-            #[cfg(feature = "trace")]
+            hist_enabled: false,
+            pcwatch: std::env::var("PCWATCH").ok().and_then(|v| v.parse().ok()).unwrap_or(0),
             hist: Vec::new(),
             out: Vec::with_capacity(8192),
             audio_acc: 0.0,
@@ -206,6 +208,16 @@ impl System {
             ppu.process_dot(mapper.as_mut());
         }
         let mut result = self.cpu.bus_latch;
+        // Sample the NMI input on every dot, before any bus access can clear
+        // the vblank flag (the NMI comes from the flag's edge, so a $2002 read
+        // in the same dot does not hide it).
+        {
+            let line = self.ppu.nmi_line();
+            if line && !self.prev_nmi {
+                self.nmi_latch = true;
+            }
+            self.prev_nmi = line;
+        }
         match access {
             Some(Access::Read(addr)) => {
                 result = self.bus_read(addr);
@@ -225,26 +237,6 @@ impl System {
     #[inline]
     fn raw_cycle(&mut self, access: Option<Access>) -> u8 {
         let v = self.clock_dot(access);
-        // The NMI input is sampled during phi2 of each CPU cycle (here: at the
-        // bus access point); the edge detector's output is visible next cycle.
-        let line = self.ppu.nmi_line();
-        if line && !self.prev_nmi {
-            self.nmi_latch = true;
-            #[cfg(feature = "trace")]
-            {
-                if std::env::var("TRACE_NMI").is_ok() {
-                    eprintln!("NMI edge latched @{} (sl={},dot={})", self.cycles, self.ppu.scanline, self.ppu.dot);
-                }
-            }
-        }
-        #[cfg(feature = "trace")]
-        {
-            if std::env::var("TRACE_NMI").is_ok() && line != self.prev_nmi {
-                eprintln!("NMI line {} @{} (sl={},dot={}) status={:02X} ctrl={:02X}", if line {"HIGH"} else {"low"},
-                    self.cycles, self.ppu.scanline, self.ppu.dot, self.ppu.status, self.ppu.ctrl);
-            }
-        }
-        self.prev_nmi = line;
         // The IRQ input is level-sensitive and polled every CPU cycle.
         if self.irq_line() && !self.cpu.flag(crate::cpu::FLAG_I) {
             self.cpu.irq_seen = true;
@@ -474,7 +466,19 @@ impl System {
     }
 
     /// Run one CPU instruction (or interrupt sequence, or DMA cycle).
+    #[inline]
+    fn sample_hist(&mut self) {
+        if self.hist_enabled && self.cycles & 0x1FF == 0 {
+            self.hist.push(self.cpu.pc);
+        }
+        if self.pcwatch != 0 && self.cycles % self.pcwatch == 0 {
+            eprintln!("pcwatch cyc={} pc={:04X} a={:02X} x={:02X} y={:02X} sp={:02X}",
+                self.cycles, self.cpu.pc, self.cpu.a, self.cpu.x, self.cpu.y, self.cpu.sp);
+        }
+    }
+
     pub fn step(&mut self) {
+        self.sample_hist();
         #[cfg(feature = "trace")]
         {
             if std::env::var("TRACE_PC").is_ok() {

@@ -22,6 +22,7 @@ fn main() {
     let mut a12 = false;
     let mut dumpvram: Option<String> = None;
     let mut oam = false;
+    let mut hot = false;
     let mut i = 3;
     while i < args.len() {
         match args[i].as_str() {
@@ -74,6 +75,10 @@ fn main() {
                 oam = true;
                 i += 1;
             }
+            "--hot" => {
+                hot = true;
+                i += 1;
+            }
             "--dumpvram" => {
                 dumpvram = Some(args[i + 1].clone());
                 i += 2;
@@ -97,6 +102,10 @@ fn main() {
 
     let mut all_audio: Vec<i16> = Vec::new();
     let start = std::time::Instant::now();
+    if hot {
+        sys.hist_enabled = true;
+        sys.hist.clear();
+    }
     for f in 0..frames {
         sys.run_frame();
         if f >= from {
@@ -193,6 +202,17 @@ fn main() {
         std::fs::write(format!("{}/chr.bin", dir), &chr).ok();
         std::fs::write(format!("{}/vram.bin", dir), &sys.ppu.vram[..]).ok();
         std::fs::write(format!("{}/pal.bin", dir), &sys.ppu.palette[..]).ok();
+    }
+    if hot {
+        let mut counts: std::collections::HashMap<u16, u64> = std::collections::HashMap::new();
+        for &pc in sys.hist.iter() {
+            *counts.entry(pc).or_insert(0) += 1;
+        }
+        let mut v: Vec<(u16, u64)> = counts.into_iter().collect();
+        v.sort_by(|a, b| b.1.cmp(&a.1));
+        for (pc, n) in v.iter().take(20) {
+            eprintln!("hot {:04X}: {}", pc, n);
+        }
     }
     let elapsed = start.elapsed();
     if bench {
