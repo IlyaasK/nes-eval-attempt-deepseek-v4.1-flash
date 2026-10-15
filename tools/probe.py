@@ -25,20 +25,25 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def build(asm_text, chr_ram=True, mirroring="horizontal", origin=0xC000,
-          prg_banks=2, vectors=("start", "start", "start")):
+          prg_banks=2, vectors=("start", "start", "start"), mapper=0, chr_bytes=None,
+          bank_size=0x4000):
     a = Assembler(origin=origin)
     for line in asm_text.splitlines():
         a.line(line)
     code = a.assemble()
-    body = bytearray(b"\xea" * 0x4000)
+    body = bytearray(b"\xea" * bank_size)
     body[0x0000:len(code)] = code
     v = [a.labels[x] if isinstance(x, str) else x for x in vectors]
+    vec_off = bank_size - 6
     for i in range(3):
-        body[0x3FFA + i * 2] = v[i] & 0xFF
-        body[0x3FFB + i * 2] = (v[i] >> 8) & 0xFF
+        body[vec_off + i * 2] = v[i] & 0xFF
+        body[vec_off + i * 2 + 1] = (v[i] >> 8) & 0xFF
     prg = bytes(body) * prg_banks
-    chr_ = b"" if chr_ram else bytes(8192)
-    return build_rom(prg, chr_, 0, mirroring, 0, False, 0)
+    if chr_bytes is not None:
+        chr_ = chr_bytes
+    else:
+        chr_ = b"" if chr_ram else bytes(8192)
+    return build_rom(prg, chr_, mapper, mirroring, 0, False, 0)
 
 
 def run_both(path, rom, frames=4, keys="0"):

@@ -687,7 +687,6 @@ impl Ppu {
         self.flush_palette();
         self.flush_v_inc();
         self.flush_regs(mapper);
-        let _ = &mapper;
         if self.decay_timer > 0 {
             self.decay_timer -= 1;
             if self.decay_timer == 0 {
@@ -730,10 +729,17 @@ impl Ppu {
                 let in_bg_fetch = dot <= 255 || (320..=335).contains(&dot);
                 let in_sprite_fetch = (256..=319).contains(&dot);
                 if in_bg_fetch {
+                    // The last fetch window of a visible scanline (dots 240-255)
+                    // wraps into the next nametable; the reference keeps the
+                    // previous latches for those pixels.
+                    let keep_latch = dot >= 240 && dot <= 255 && sl <= 239;
                     match dot & 7 {
                         0 => {
                             let a = 0x2000 | (self.v & 0x0FFF);
-                            self.bg_latch_nt = self.vram_read(a, mapper);
+                            let nt = self.vram_read(a, mapper);
+                            if !keep_latch {
+                                self.bg_latch_nt = nt;
+                            }
                             #[cfg(feature = "trace")]
                             {
                                 if std::env::var("TRACE_FETCH").is_ok() && self.scanline == 0 {
@@ -748,19 +754,28 @@ impl Ppu {
                                 | ((self.v >> 2) & 0x07);
                             let at = self.vram_read(a, mapper);
                             let shift = ((self.v >> 4) & 4) | (self.v & 2);
-                            self.at_latch = (at >> shift) & 3;
+                            let latch = (at >> shift) & 3;
+                            if !keep_latch {
+                                self.at_latch = latch;
+                            }
                         }
                         4 => {
                             let fine_y = (self.v >> 12) & 7;
                             let pt = if self.ctrl & 0x10 != 0 { 0x1000 } else { 0 };
                             let a = pt | ((self.bg_latch_nt as u16) << 4) | fine_y;
-                            self.bg_latch_lo = self.vram_read(a, mapper);
+                            let lo = self.vram_read(a, mapper);
+                            if !keep_latch {
+                                self.bg_latch_lo = lo;
+                            }
                         }
                         6 => {
                             let fine_y = (self.v >> 12) & 7;
                             let pt = if self.ctrl & 0x10 != 0 { 0x1000 } else { 0 };
                             let a = pt | ((self.bg_latch_nt as u16) << 4) | fine_y | 8;
-                            self.bg_latch_hi = self.vram_read(a, mapper);
+                            let hi = self.vram_read(a, mapper);
+                            if !keep_latch {
+                                self.bg_latch_hi = hi;
+                            }
                         }
                         7 => {
                             if dot <= 255 || dot >= 327 {

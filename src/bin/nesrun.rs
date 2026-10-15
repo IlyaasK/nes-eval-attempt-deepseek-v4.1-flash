@@ -156,7 +156,7 @@ fn main() {
             eprintln!("frame {}: cycles={} samples={}", f, sys.cycles, sys.out.len());
         }
         sys.out.clear();
-        if std::env::args().any(|a| a == "--prgram") {
+        if std::env::args().any(|a| a == "--prgram") && f % 10 == 9 {
             let prg = sys.mapper.prg_ram();
             if prg.len() > 0x40 {
                 let mut txt = String::new();
