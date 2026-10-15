@@ -41,6 +41,9 @@ fn main() {
             "--state" => {
                 i += 1;
             }
+            "--palette" => {
+                i += 1;
+            }
             "--bench" => {
                 bench = true;
                 i += 1;
@@ -81,6 +84,11 @@ fn main() {
             }
         }
         sys.out.clear();
+        if std::env::args().any(|a| a == "--palette") {
+            eprintln!("frame {}: pal0={:02X} {:02X} {:02X} {:02X} v={:04X} mask={:02X} fb[0]={:04X}",
+                f, sys.ppu.palette[0], sys.ppu.palette[1], sys.ppu.palette[2], sys.ppu.palette[3],
+                sys.ppu.v, sys.ppu.mask, sys.ppu.fb[0]);
+        }
         if std::env::args().any(|a| a == "--state") {
             eprintln!("frame {}: cycles={} pc={:04X} ppu ctrl={:02X} mask={:02X} v={:04X} t={:04X} sl={} dot={}",
                 f, sys.cycles, sys.cpu.pc, sys.ppu.ctrl, sys.ppu.mask, sys.ppu.v, sys.ppu.t, sys.ppu.scanline, sys.ppu.dot);

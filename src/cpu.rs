@@ -118,6 +118,22 @@ impl System {
         let _ = self.rd(addr);
     }
 
+    /// The internal cycle of an implied/accumulator instruction: the CPU reads
+    /// the next instruction byte (at PC) and throws it away.
+    #[inline]
+    fn implied(&mut self) {
+        let pc = self.cpu.pc;
+        self.idle_read(pc);
+    }
+
+    /// The extra cycle before a pull: the stack pointer is incremented and the
+    /// stack location is read (value discarded).
+    #[inline]
+    fn push_pop_delay(&mut self) {
+        let sp = self.cpu.sp.wrapping_add(1);
+        self.idle_read(0x0100 | sp as u16);
+    }
+
     // --------------------------------------------------------- addressing ---
 
     #[inline]
@@ -162,7 +178,8 @@ impl System {
         }
         addr
     }
-    /// Indexed with an unconditional dummy read at the unfixed address (RMW ops).
+    /// Indexed with an unconditional dummy read at the unfixed address
+    /// (RMW ops and indexed stores).
     #[inline]
     fn am_absx_rmw(&mut self) -> u16 {
         let base = self.fetch16();
@@ -177,13 +194,23 @@ impl System {
         self.idle_read((base & 0xFF00) | (addr & 0x00FF));
         addr
     }
+    /// (zp,X): 4 cycles (dummy read of the un-indexed pointer address first).
     #[inline]
     fn am_indx(&mut self) -> u16 {
         let b = self.fetch();
+        self.idle_read(b as u16);
         let p = b.wrapping_add(self.cpu.x);
         let lo = self.rd(p as u16) as u16;
         let hi = self.rd(p.wrapping_add(1) as u16) as u16;
         (hi << 8) | lo
+    }
+
+    /// zp,X for read-modify-write instructions (6 cycles total with the RMW).
+    #[inline]
+    fn am_zpx_rmw(&mut self) -> u16 {
+        let b = self.fetch();
+        self.idle_read(b as u16);
+        b.wrapping_add(self.cpu.x) as u16
     }
     #[inline]
     fn am_indy(&mut self) -> u16 {
@@ -408,10 +435,11 @@ impl System {
     /// IRQ/NMI/BRK sequence. `vector` is the target vector address.
     fn interrupt_sequence(&mut self, vector: u16, brk: bool) {
         self.cpu.in_interrupt = true;
-        // Cycles 1-2: dummy reads of PC.
+        // BRK fetches its opcode first, so it only has one dummy read here.
         let pc = self.cpu.pc;
-        self.idle_read(pc);
-        // BRK pushes PC+1 (the byte after the padding byte).
+        if !brk {
+            self.idle_read(pc);
+        }
         self.idle_read(pc);
         let pc = self.cpu.pc;
         self.push((pc >> 8) as u8);
@@ -961,11 +989,11 @@ impl System {
                 self.wr(a, self.cpu.a);
             }
             0x9D => {
-                let a = self.am_absx();
+                let a = self.am_absx_rmw();
                 self.wr(a, self.cpu.a);
             }
             0x99 => {
-                let a = self.am_absy();
+                let a = self.am_absy_rmw();
                 self.wr(a, self.cpu.a);
             }
             0x81 => {
@@ -973,7 +1001,7 @@ impl System {
                 self.wr(a, self.cpu.a);
             }
             0x91 => {
-                let a = self.am_indy();
+                let a = self.am_indy_rmw();
                 self.wr(a, self.cpu.a);
             }
             // ---- STX / STY
@@ -1003,6 +1031,7 @@ impl System {
             }
             // ---- RMW
             0x0A => {
+                self.implied();
                 let a = self.cpu.a;
                 let r = self.asl_value(a);
                 self.cpu.a = r;
@@ -1012,7 +1041,7 @@ impl System {
                 self.rmw_asl(a);
             }
             0x16 => {
-                let a = self.am_zpx();
+                let a = self.am_zpx_rmw();
                 self.rmw_asl(a);
             }
             0x0E => {
@@ -1024,6 +1053,7 @@ impl System {
                 self.rmw_asl(a);
             }
             0x4A => {
+                self.implied();
                 let a = self.cpu.a;
                 let r = self.lsr_value(a);
                 self.cpu.a = r;
@@ -1033,7 +1063,7 @@ impl System {
                 self.rmw_lsr(a);
             }
             0x56 => {
-                let a = self.am_zpx();
+                let a = self.am_zpx_rmw();
                 self.rmw_lsr(a);
             }
             0x4E => {
@@ -1045,6 +1075,7 @@ impl System {
                 self.rmw_lsr(a);
             }
             0x2A => {
+                self.implied();
                 let a = self.cpu.a;
                 let r = self.rol_value(a);
                 self.cpu.a = r;
@@ -1054,7 +1085,7 @@ impl System {
                 self.rmw_rol(a);
             }
             0x36 => {
-                let a = self.am_zpx();
+                let a = self.am_zpx_rmw();
                 self.rmw_rol(a);
             }
             0x2E => {
@@ -1066,6 +1097,7 @@ impl System {
                 self.rmw_rol(a);
             }
             0x6A => {
+                self.implied();
                 let a = self.cpu.a;
                 let r = self.ror_value(a);
                 self.cpu.a = r;
@@ -1075,7 +1107,7 @@ impl System {
                 self.rmw_ror(a);
             }
             0x76 => {
-                let a = self.am_zpx();
+                let a = self.am_zpx_rmw();
                 self.rmw_ror(a);
             }
             0x6E => {
@@ -1091,7 +1123,7 @@ impl System {
                 self.rmw_inc(a);
             }
             0xF6 => {
-                let a = self.am_zpx();
+                let a = self.am_zpx_rmw();
                 self.rmw_inc(a);
             }
             0xEE => {
@@ -1107,7 +1139,7 @@ impl System {
                 self.rmw_dec(a);
             }
             0xD6 => {
-                let a = self.am_zpx();
+                let a = self.am_zpx_rmw();
                 self.rmw_dec(a);
             }
             0xCE => {
@@ -1151,15 +1183,17 @@ impl System {
                 self.cpu.pc = ((hi as u16) << 8) | lo as u16;
             }
             0x60 => {
-                let sp = self.cpu.sp;
-                self.idle_read(0x0100 | sp as u16);
+                self.implied();
+                self.push_pop_delay();
                 let lo = self.pop() as u16;
                 let hi = self.pop() as u16;
-                self.cpu.pc = ((hi << 8) | lo).wrapping_add(1);
+                let pc = ((hi << 8) | lo).wrapping_add(1);
+                self.cpu.pc = pc;
+                self.idle_read(pc);
             }
             0x40 => {
-                let sp = self.cpu.sp;
-                self.idle_read(0x0100 | sp as u16);
+                self.implied();
+                self.push_pop_delay();
                 let p = self.pop();
                 self.cpu.p = (p & !FLAG_B) | FLAG_U;
                 let lo = self.pop() as u16;
@@ -1181,82 +1215,119 @@ impl System {
             0xD0 => self.branch(!self.cpu.flag(FLAG_Z)),
             0xF0 => self.branch(self.cpu.flag(FLAG_Z)),
             // ---- Flags
-            0x18 => self.cpu.set_flag(FLAG_C, false),
-            0x38 => self.cpu.set_flag(FLAG_C, true),
-            0x58 => self.cpu.set_flag(FLAG_I, false),
-            0x78 => self.cpu.set_flag(FLAG_I, true),
-            0xB8 => self.cpu.set_flag(FLAG_V, false),
-            0xD8 => self.cpu.set_flag(FLAG_D, false),
-            0xF8 => self.cpu.set_flag(FLAG_D, true),
-            0xEA => {}
+            0x18 => {
+                self.implied();
+                self.cpu.set_flag(FLAG_C, false);
+            }
+            0x38 => {
+                self.implied();
+                self.cpu.set_flag(FLAG_C, true);
+            }
+            0x58 => {
+                self.implied();
+                self.cpu.set_flag(FLAG_I, false);
+            }
+            0x78 => {
+                self.implied();
+                self.cpu.set_flag(FLAG_I, true);
+            }
+            0xB8 => {
+                self.implied();
+                self.cpu.set_flag(FLAG_V, false);
+            }
+            0xD8 => {
+                self.implied();
+                self.cpu.set_flag(FLAG_D, false);
+            }
+            0xF8 => {
+                self.implied();
+                self.cpu.set_flag(FLAG_D, true);
+            }
+            0xEA => self.implied(),
             // ---- Transfers / stack
             0xAA => {
+                self.implied();
                 self.cpu.x = self.cpu.a;
                 let v = self.cpu.x;
                 self.cpu.set_zn(v);
             }
             0xA8 => {
+                self.implied();
                 self.cpu.y = self.cpu.a;
                 let v = self.cpu.y;
                 self.cpu.set_zn(v);
             }
             0x8A => {
+                self.implied();
                 self.cpu.a = self.cpu.x;
                 let v = self.cpu.a;
                 self.cpu.set_zn(v);
             }
             0x98 => {
+                self.implied();
                 self.cpu.a = self.cpu.y;
                 let v = self.cpu.a;
                 self.cpu.set_zn(v);
             }
             0xBA => {
+                self.implied();
                 self.cpu.x = self.cpu.sp;
                 let v = self.cpu.x;
                 self.cpu.set_zn(v);
             }
             0x9A => {
+                self.implied();
                 self.cpu.sp = self.cpu.x;
             }
             0xE8 => {
+                self.implied();
                 let v = self.cpu.x.wrapping_add(1);
                 self.cpu.x = v;
                 self.cpu.set_zn(v);
             }
             0xCA => {
+                self.implied();
                 let v = self.cpu.x.wrapping_sub(1);
                 self.cpu.x = v;
                 self.cpu.set_zn(v);
             }
             0xC8 => {
+                self.implied();
                 let v = self.cpu.y.wrapping_add(1);
                 self.cpu.y = v;
                 self.cpu.set_zn(v);
             }
             0x88 => {
+                self.implied();
                 let v = self.cpu.y.wrapping_sub(1);
                 self.cpu.y = v;
                 self.cpu.set_zn(v);
             }
             0x08 => {
+                self.implied();
                 let p = self.cpu.p | FLAG_B | FLAG_U;
                 self.push(p);
             }
             0x28 => {
+                self.implied();
+                self.push_pop_delay();
                 let p = self.pop();
                 self.cpu.p = (p & !FLAG_B) | FLAG_U;
             }
             0x48 => {
+                self.implied();
                 let a = self.cpu.a;
                 self.push(a);
             }
             0x68 => {
+                self.implied();
+                self.push_pop_delay();
                 let v = self.pop();
                 self.cpu.a = v;
                 self.cpu.set_zn(v);
             }
             // ---- Illegal NOPs (implied / immediate)
-            0x1A | 0x3A | 0x5A | 0x7A | 0xDA | 0xFA => {}
+            0x1A | 0x3A | 0x5A | 0x7A | 0xDA | 0xFA => self.implied(),
             0x80 | 0x82 | 0x89 | 0xC2 | 0xE2 => {
                 let _ = self.am_imm();
             }
@@ -1353,7 +1424,7 @@ impl System {
                 self.rmw_slo(a);
             }
             0x17 => {
-                let a = self.am_zpx();
+                let a = self.am_zpx_rmw();
                 self.rmw_slo(a);
             }
             0x0F => {
@@ -1382,7 +1453,7 @@ impl System {
                 self.rmw_rla(a);
             }
             0x37 => {
-                let a = self.am_zpx();
+                let a = self.am_zpx_rmw();
                 self.rmw_rla(a);
             }
             0x2F => {
@@ -1411,7 +1482,7 @@ impl System {
                 self.rmw_sre(a);
             }
             0x57 => {
-                let a = self.am_zpx();
+                let a = self.am_zpx_rmw();
                 self.rmw_sre(a);
             }
             0x4F => {
@@ -1440,7 +1511,7 @@ impl System {
                 self.rmw_rra(a);
             }
             0x77 => {
-                let a = self.am_zpx();
+                let a = self.am_zpx_rmw();
                 self.rmw_rra(a);
             }
             0x6F => {
@@ -1469,7 +1540,7 @@ impl System {
                 self.rmw_dcp(a);
             }
             0xD7 => {
-                let a = self.am_zpx();
+                let a = self.am_zpx_rmw();
                 self.rmw_dcp(a);
             }
             0xCF => {
@@ -1498,7 +1569,7 @@ impl System {
                 self.rmw_isb(a);
             }
             0xF7 => {
-                let a = self.am_zpx();
+                let a = self.am_zpx_rmw();
                 self.rmw_isb(a);
             }
             0xEF => {
@@ -1575,7 +1646,7 @@ impl System {
                 self.cpu.set_zn(r);
             }
             0x9B => {
-                let a = self.am_absy();
+                let a = self.am_absy_rmw();
                 let r = self.cpu.a & self.cpu.x & ((a >> 8) as u8).wrapping_add(1);
                 let sp = self.cpu.sp;
                 self.wr(a, r);
@@ -1583,12 +1654,12 @@ impl System {
                 let _ = sp;
             }
             0x9C => {
-                let a = self.am_absx();
+                let a = self.am_absx_rmw();
                 let r = self.cpu.y & ((a >> 8) as u8).wrapping_add(1);
                 self.wr(a, r);
             }
             0x9E => {
-                let a = self.am_absy();
+                let a = self.am_absy_rmw();
                 let r = self.cpu.x & ((a >> 8) as u8).wrapping_add(1);
                 self.wr(a, r);
             }
