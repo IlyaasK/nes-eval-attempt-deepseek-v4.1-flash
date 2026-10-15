@@ -50,7 +50,7 @@ const HP2_A: f64 = 0.94133; // ~440 Hz
 const LP_A: f64 = 0.86374; // ~14 kHz
 
 /// PPU dots clocked before the CPU's bus access inside its CPU cycle.
-const ACCESS_PHASE: u32 = 2;
+const ACCESS_PHASE: u32 = 0;
 
 /// Whether DMA "get" (read) cycles fall on even CPU cycles. The reference fixes
 /// this at power-on; it only affects DMA alignment cycles.

@@ -15,11 +15,12 @@ use crate::ines::*;
 use crate::mapper::Mapper;
 
 #[derive(Clone, Copy, Default)]
-struct SpriteUnit {
-    x: u8,
-    attr: u8,
-    lo: u8,
-    hi: u8,
+pub struct SpriteUnit {
+    pub x: u8,
+    pub y: u8,
+    pub attr: u8,
+    pub lo: u8,
+    pub hi: u8,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -74,7 +75,7 @@ pub struct Ppu {
     at_shift_hi: u8,
 
     // Sprite pipeline
-    sec_oam: [u8; 32],
+    pub sec_oam: [u8; 32],
     sprite_count: u8,
     sprites: [SpriteUnit; 8],
 
@@ -93,6 +94,10 @@ pub struct Ppu {
     pub oam_addr_write_during_render: bool,
     /// Current value driven on the PPU address bus (for mapper A12 tracking).
     bus_addr: u16,
+    /// Debug: sprite unit 0 state at the end of the last frame.
+    pub dbg_sp0: SpriteUnit,
+    /// Debug: number of opaque sprite pixels emitted in the last frame.
+    pub dbg_sprite_px: u32,
 }
 
 impl Ppu {
@@ -116,7 +121,7 @@ impl Ppu {
             dot: 0,
             frame: 0,
             total_dots: 0,
-            odd_frame: false,
+            odd_frame: true,
             frame_complete: false,
             bg_latch_nt: 0,
             bg_latch_at: 0,
@@ -138,6 +143,8 @@ impl Ppu {
             nmi_suppress: false,
             oam_addr_write_during_render: false,
             bus_addr: 0,
+            dbg_sp0: SpriteUnit::default(),
+            dbg_sprite_px: 0,
         }
     }
 
@@ -458,6 +465,7 @@ impl Ppu {
                             let _ = self.vram_read(a, mapper);
                             if dot & 7 == 2 {
                                 self.sprites[idx].attr = self.sec_oam[idx * 4 + 2];
+                                self.sprites[idx].y = self.sec_oam[idx * 4];
                             } else {
                                 self.sprites[idx].x = self.sec_oam[idx * 4 + 3];
                             }
@@ -468,7 +476,15 @@ impl Ppu {
                         }
                         5 => {
                             let (a, _) = self.sprite_pattern_addr(idx, mapper);
-                            self.sprites[idx].lo = self.vram_read(a, mapper);
+                            let v = self.vram_read(a, mapper);
+                            #[cfg(feature = "trace")]
+                            {
+                                if std::env::var("TRACE_SPR").is_ok() && idx == 0 && self.scanline < 60 {
+                                    eprintln!("fetch lo sl={} dot={} addr={:04X} val={:02X} sec0={:02X}{:02X}{:02X}{:02X}",
+                                        self.scanline, dot, a, v, self.sec_oam[0], self.sec_oam[1], self.sec_oam[2], self.sec_oam[3]);
+                                }
+                            }
+                            self.sprites[idx].lo = v;
                         }
                         6 => {
                             let (a, _) = self.sprite_pattern_addr(idx, mapper);
@@ -476,13 +492,22 @@ impl Ppu {
                         }
                         _ => {
                             let (a, _) = self.sprite_pattern_addr(idx, mapper);
-                            self.sprites[idx].hi = self.vram_read(a, mapper);
+                            // The high bitplane is 8 bytes above the low one.
+                            self.sprites[idx].hi = self.vram_read(a + 8, mapper);
                         }
                     }
                 }
 
                 // --------------------------------------------------- pixel ---
                 if sl <= 239 && (1..=256).contains(&dot) {
+                    #[cfg(feature = "trace")]
+                    {
+                        if std::env::var("TRACE_SPR").is_ok() && dot == 100 && sl < 60 {
+                            let s0 = &self.sprites[0];
+                            eprintln!("render sl={} dot={} sp0 x={} attr={:02X} lo={:02X} hi={:02X} sec0={:02X}{:02X}{:02X}{:02X}",
+                                sl, dot, s0.x, s0.attr, s0.lo, s0.hi, self.sec_oam[0], self.sec_oam[1], self.sec_oam[2], self.sec_oam[3]);
+                        }
+                    }
                     self.render_pixel(mapper);
                 }
                 // The shift registers also shift during the prefetch phase.
@@ -587,8 +612,8 @@ impl Ppu {
         let y = self.sec_oam[idx * 4] as u16;
         let tile = self.sec_oam[idx * 4 + 1];
         let attr = self.sec_oam[idx * 4 + 2];
-        let target = self.scanline + 1;
-        let diff = target.wrapping_sub(y) & 0xFF;
+        // Row within the sprite for the scanline being prepared (scanline + 1).
+        let diff = self.scanline.wrapping_sub(y) & 0xFF;
         let mut row = diff as u8;
         if tall {
             row &= 0x0F;
@@ -644,7 +669,18 @@ impl Ppu {
         let mut sp_prio = 0u8;
         let mut sprite0_opaque = false;
         if sp_enabled {
+            let height: u16 = if self.ctrl & 0x20 != 0 { 16 } else { 8 };
             for i in 0..8 {
+                // Row index within the sprite for this scanline (a sprite with
+                // OAM Y == y occupies scanlines y+1 .. y+height).
+                let row = self
+                    .scanline
+                    .wrapping_sub(self.sprites[i].y as u16)
+                    .wrapping_sub(1)
+                    & 0xFF;
+                if row >= height {
+                    continue;
+                }
                 if self.sprites[i].x > 0 {
                     self.sprites[i].x -= 1;
                     continue;
@@ -682,6 +718,9 @@ impl Ppu {
         }
 
         // ------------------------------------------------------- compose ---
+        if sp_pixel != 0 {
+            self.dbg_sprite_px += 1;
+        }
         let (pixel, pal, is_sprite) = if bg_pixel == 0 && sp_pixel == 0 {
             (0u8, 0u8, false)
         } else if bg_pixel == 0 {
@@ -733,7 +772,9 @@ impl Ppu {
 
     fn ev_in_range(&self, y: u8) -> bool {
         let height: u16 = if self.ctrl & 0x20 != 0 { 16 } else { 8 };
-        let diff = (self.scanline as u16 + 1).wrapping_sub(y as u16) & 0xFF;
+        // Sprites with OAM Y == y are displayed on scanlines y+1 .. y+height, so
+        // the evaluation on scanline L selects them when L - y < height.
+        let diff = self.scanline.wrapping_sub(y as u16) & 0xFF;
         diff < height
     }
 
@@ -799,6 +840,12 @@ impl Ppu {
 
     /// Advance to the next dot; handles scanline/frame boundaries.
     pub fn advance(&mut self) {
+        if self.scanline == 0 && self.dot == 0 {
+            self.dbg_sprite_px = 0;
+        }
+        if self.scanline == 239 && self.dot == 0 {
+            self.dbg_sp0 = self.sprites[0];
+        }
         self.dot += 1;
         self.total_dots += 1;
         let line_len: u16 = 341;
