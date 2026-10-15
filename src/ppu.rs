@@ -640,7 +640,13 @@ impl Ppu {
                 self.oam_addr = val;
             }
             4 => {
-                self.oam[self.oam_addr as usize] = val;
+                // Writes to OAMDATA during rendering do not modify OAM (only
+                // the OAM address is bumped).
+                let in_render = self.rendering_enabled()
+                    && (self.scanline <= 239 || self.scanline == 261);
+                if !in_render {
+                    self.oam[self.oam_addr as usize] = val;
+                }
                 self.oam_addr = self.oam_addr.wrapping_add(1);
             }
             5 => {

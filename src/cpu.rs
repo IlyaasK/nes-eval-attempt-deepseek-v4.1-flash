@@ -502,7 +502,7 @@ impl System {
             self.interrupt_sequence(0xFFFA, false);
             return;
         }
-        if self.cpu.irq_seen && !self.cpu.flag(FLAG_I) {
+        if self.cpu.irq_seen {
             let line = self.irq_line();
             if line {
                 self.interrupt_sequence(0xFFFE, false);
@@ -1331,7 +1331,9 @@ impl System {
             // ---- Illegal NOPs (implied / immediate)
             0x1A | 0x3A | 0x5A | 0x7A | 0xDA | 0xFA => self.implied(),
             0x80 | 0x82 | 0x89 | 0xC2 | 0xE2 => {
-                let _ = self.am_imm();
+                // NOP #imm: four variants, each 2 cycles (the operand read).
+                let a = self.am_imm();
+                let _ = self.rd(a);
             }
             0x04 | 0x44 | 0x64 => {
                 let a = self.am_zp();
