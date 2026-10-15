@@ -16,7 +16,7 @@ the $6000 result byte/ log blargg's suites write), `tools/audiodiff.py`
 | robotfindskitten.nes | 599/600 | 2 |
 | file-fixers.nes      | 596/600 | 21 |
 | stallar.nes          | 592/600 | 19 |
-| rhde.nes             | 23/300  | 179126 (about 649/frame after frame 23) |
+| rhde.nes             | 299/300 | 2 |
 
 With a Start/A input replay the games still follow the reference (robotfindskitten
 and stallar stay within a few hundred pixels over 300 frames).
@@ -27,6 +27,7 @@ and stallar stay within a few hundred pixels over 300 frames).
 * `apu_test__4-jitter`, `__5-len_timing`, `__6-irq_flag_timing`,
   `__8-dmc_rates` - "Passed"
 * `mmc3_test_2__2-details` - "Passed"
+* `ppu_vbl_nmi__06-suppression` - $00 (passed)
 * `sprite_hit_tests__02..08`, `sprite_overflow_tests__2.Details`,
   `sprite_overflow_tests__3.Timing`, `branch_timing_tests__1.Branch_Basics` -
   final screen byte-identical to the reference (same verdict)

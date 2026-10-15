@@ -37,6 +37,22 @@ const DECAY_CYCLES: u32 = 600_000;
 
 /// Which PPU dot a $2002 read suppresses the vblank set on:
 /// bit 0 = the dot before the set (240,340), bit 1 = the set dot (241,0).
+/// Whether the attribute latch is transferred one refresh window later.
+static mut ATTR_DELAY: bool = true;
+#[cfg(feature = "trace")]
+fn attr_delay() -> bool {
+    unsafe {
+        if let Ok(v) = std::env::var("ATTR_DELAY") {
+            ATTR_DELAY = v != "0";
+        }
+        ATTR_DELAY
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn attr_delay() -> bool {
+    unsafe { ATTR_DELAY }
+}
+
 static mut VBL_SUPPRESS_MODE: u32 = 1;
 /// Dot of scanline 241 on which the vblank flag is set (the documentation's
 /// dot 1; reads on the dot before it clear and drop the flag).
@@ -199,6 +215,8 @@ pub struct Ppu {
     bg_shift_lo: u16,
     bg_shift_hi: u16,
     at_latch: u8,
+    /// Previous attribute latch (used when the reference delays the transfer).
+    at_latch_prev: u8,
     at_shift_lo: u8,
     at_shift_hi: u8,
 
@@ -275,6 +293,7 @@ impl Ppu {
             bg_shift_lo: 0,
             bg_shift_hi: 0,
             at_latch: 0,
+            at_latch_prev: 0,
             at_shift_lo: 0,
             at_shift_hi: 0,
             sec_oam: [0xFF; 32],
@@ -956,10 +975,18 @@ impl Ppu {
 
     #[inline]
     fn load_shifters(&mut self) {
+        #[cfg(feature = "trace")]
+        {
+            if std::env::var("TRACE_AT").is_ok() && self.scanline == 64 && self.dot <= 48 {
+                eprintln!("reload dot={} at_latch={} v={:04X}", self.dot, self.at_latch, self.v);
+            }
+        }
         self.bg_shift_lo = (self.bg_shift_lo & 0xFF00) | self.bg_latch_lo as u16;
         self.bg_shift_hi = (self.bg_shift_hi & 0xFF00) | self.bg_latch_hi as u16;
-        self.at_shift_lo = if self.at_latch & 1 != 0 { 0xFF } else { 0 };
-        self.at_shift_hi = if self.at_latch & 2 != 0 { 0xFF } else { 0 };
+        let latch = if attr_delay() { self.at_latch_prev } else { self.at_latch };
+        self.at_latch_prev = self.at_latch;
+        self.at_shift_lo = if latch & 1 != 0 { 0xFF } else { 0 };
+        self.at_shift_hi = if latch & 2 != 0 { 0xFF } else { 0 };
     }
 
     fn sprite_pattern_addr(&mut self, idx: usize, _mapper: &mut dyn Mapper) -> (u16, u8) {

@@ -38,7 +38,7 @@ def render(chr_, vram, pal, bgpt, ntbits, mirror, sx, sy, fine_x=0, fine_y=0):
             if px == 0:
                 idx = 0
             else:
-                at = vram[base + 0x3C0 + (ty % 30) // 2 * 8 + (tx % 32) // 4]
+                at = vram[base + 0x3C0 + (ty % 30) // 4 * 8 + (tx % 32) // 4]
                 shift = ((ty & 2) << 1) | (tx & 2)
                 p = (at >> shift) & 3
                 idx = p * 4 + px

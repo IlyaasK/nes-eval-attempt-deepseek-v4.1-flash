@@ -19,6 +19,22 @@ const FIR_COEFFS: [f64; FIR_TAPS] = [
     -0.0002454556, 0.0020410250, -0.0013859498, 0.0003321966, 0.0000971652, -0.0000582377, -0.0000000000,
 ];
 
+/// Whether the windowed-sinc FIR resampler is applied to the output.
+static mut FIR_ENABLED: bool = true;
+#[cfg(feature = "trace")]
+fn fir_enabled() -> bool {
+    unsafe {
+        if let Ok(v) = std::env::var("FIR") {
+            FIR_ENABLED = v != "0";
+        }
+        FIR_ENABLED
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn fir_enabled() -> bool {
+    unsafe { FIR_ENABLED }
+}
+
 /// Audio pipeline constants (tuned against the reference emulator).
 const AUDIO_START_DELAY: f64 = -(728.0 / (CPU_HZ / SAMPLE_RATE as f64));
 /// Scale applied to the DC-blocked mixer output.
@@ -617,8 +633,12 @@ impl System {
             }
             self.fir_hist[FIR_TAPS - 1] = y3;
             let mut acc = 0.0;
-            for i in 0..FIR_TAPS {
-                acc += self.fir_hist[i] * FIR_COEFFS[i];
+            if fir_enabled() {
+                for i in 0..FIR_TAPS {
+                    acc += self.fir_hist[i] * FIR_COEFFS[i];
+                }
+            } else {
+                acc = y3;
             }
             let v = (acc * s_scale).clamp(-32768.0, 32767.0) as i16;
             self.out.push(v);

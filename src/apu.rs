@@ -512,6 +512,8 @@ struct FrameCounter {
 // APU
 // ---------------------------------------------------------------------------
 
+static mut MIX_DC: f32 = 0.0;
+
 pub struct Apu {
     pulse: [Pulse; 2],
     triangle: Triangle,
@@ -539,16 +541,30 @@ impl Apu {
             last_cycle: 0,
             have_last_cycle: false,
         };
+        let dc = unsafe {
+            #[cfg(feature = "trace")]
+            {
+                if let Ok(v) = std::env::var("MIX_DC") {
+                    if let Ok(f) = v.parse::<f32>() {
+                        MIX_DC = f;
+                    }
+                }
+            }
+            MIX_DC
+        };
         for n in 0..31 {
             apu.pulse_table[n] = if n == 0 {
-                0.0
+                // The formula's value at zero input is its limit (95.52/100);
+                // the reference keeps that DC offset, which the output filters
+                // turn into the power-on transient.
+                dc * (95.52 / 100.0) / (95.52 / 100.0 + 159.79 / 100.0)
             } else {
                 95.52f32 / (8128.0f32 / n as f32 + 100.0f32)
             };
         }
         for n in 0..203 {
             apu.tnd_table[n] = if n == 0 {
-                0.0
+                dc * (159.79 / 100.0) / (95.52 / 100.0 + 159.79 / 100.0)
             } else {
                 163.67f32 / (24329.0f32 / n as f32 + 100.0f32)
             };
