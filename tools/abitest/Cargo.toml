@@ -1,0 +1,9 @@
+[package]
+name = "abitest"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+wasmtime = { version = "27", default-features = false, features = ["cranelift", "runtime"] }
+
+[workspace]

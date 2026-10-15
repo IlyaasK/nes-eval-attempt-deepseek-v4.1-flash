@@ -8,6 +8,47 @@ use crate::ppu::Ppu;
 pub const CPU_HZ: f64 = 1789772.7272727273;
 pub const SAMPLE_RATE: u32 = 44100;
 
+/// Audio pipeline constants (tuned against the reference emulator).
+const AUDIO_START_DELAY: f64 = -(728.0 / (CPU_HZ / SAMPLE_RATE as f64));
+/// Scale applied to the DC-blocked mixer output.
+static mut AUDIO_SCALE: f64 = 32000.0;
+static mut HP1_HZ: f64 = 90.0;
+static mut HP2_HZ: f64 = 440.0;
+static mut LP_HZ: f64 = 14000.0;
+
+#[cfg(feature = "trace")]
+fn load_audio_env() {
+    unsafe {
+        if let Ok(v) = std::env::var("A_SCALE") {
+            if let Ok(f) = v.parse::<f64>() { AUDIO_SCALE = f; }
+        }
+        if let Ok(v) = std::env::var("A_HP1") {
+            if let Ok(f) = v.parse::<f64>() { HP1_HZ = f; }
+        }
+        if let Ok(v) = std::env::var("A_HP2") {
+            if let Ok(f) = v.parse::<f64>() { HP2_HZ = f; }
+        }
+        if let Ok(v) = std::env::var("A_LP") {
+            if let Ok(f) = v.parse::<f64>() { LP_HZ = f; }
+        }
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn load_audio_env() {}
+fn hp_coef(hz: f64) -> f64 {
+    let rc = 1.0 / (2.0 * core::f64::consts::PI * hz);
+    let dt = 1.0 / SAMPLE_RATE as f64;
+    rc / (rc + dt)
+}
+fn lp_coef(hz: f64) -> f64 {
+    let rc = 1.0 / (2.0 * core::f64::consts::PI * hz);
+    let dt = 1.0 / SAMPLE_RATE as f64;
+    dt / (rc + dt)
+}
+const HP1_A: f64 = 0.98726; // ~90 Hz
+const HP2_A: f64 = 0.94133; // ~440 Hz
+const LP_A: f64 = 0.86374; // ~14 kHz
+
 /// PPU dots clocked before the CPU's bus access inside its CPU cycle.
 const ACCESS_PHASE: u32 = 2;
 
@@ -73,6 +114,14 @@ pub struct System {
     // Audio output
     pub out: Vec<i16>,
     audio_acc: f64,
+    #[cfg(feature = "trace")]
+    pub mix_dump: Vec<f32>,
+    /// High-pass filter states (DC blockers) and low-pass state.
+    hp1_x: f64,
+    hp1_y: f64,
+    hp2_x: f64,
+    hp2_y: f64,
+    lp_y: f64,
 }
 
 impl System {
@@ -96,7 +145,15 @@ impl System {
             hist: Vec::new(),
             out: Vec::with_capacity(8192),
             audio_acc: 0.0,
+            #[cfg(feature = "trace")]
+            mix_dump: Vec::new(),
+            hp1_x: 0.0,
+            hp1_y: 0.0,
+            hp2_x: 0.0,
+            hp2_y: 0.0,
+            lp_y: 0.0,
         };
+        load_audio_env();
         s.power_on();
         s
     }
@@ -118,7 +175,14 @@ impl System {
         self.halt_addr = 0;
         self.first_frame = true;
         self.out.clear();
-        self.audio_acc = 0.0;
+        #[cfg(feature = "trace")]
+        self.mix_dump.clear();
+        self.audio_acc = AUDIO_START_DELAY;
+        self.hp1_x = 0.0;
+        self.hp1_y = 0.0;
+        self.hp2_x = 0.0;
+        self.hp2_y = 0.0;
+        self.lp_y = 0.0;
         self.reset_sequence();
     }
 
@@ -170,6 +234,10 @@ impl System {
             }
         }
         self.prev_nmi = line;
+        // The IRQ input is level-sensitive and polled every CPU cycle.
+        if self.irq_line() && !self.cpu.flag(crate::cpu::FLAG_I) {
+            self.cpu.irq_seen = true;
+        }
         self.apu.clock(self.cycles);
         for _ in 0..(2 - ACCESS_PHASE) {
             self.clock_dot(None);
@@ -435,8 +503,32 @@ impl System {
         self.audio_acc += SAMPLE_RATE as f64 / CPU_HZ;
         if self.audio_acc >= 1.0 {
             self.audio_acc -= 1.0;
-            let s = self.apu.mix();
-            let v = (s * 32767.0 - 16384.0).clamp(-32768.0, 32767.0) as i16;
+            let m = self.apu.mix() as f64;
+            #[allow(unused_unsafe)]
+            let (s_scale, a1, a2, a3) = unsafe {
+                (
+                    AUDIO_SCALE,
+                    hp_coef(HP1_HZ),
+                    hp_coef(HP2_HZ),
+                    lp_coef(LP_HZ),
+                )
+            };
+            #[cfg(feature = "trace")]
+            {
+                if std::env::var("MIXDUMP").is_ok() {
+                    self.mix_dump.push(m as f32);
+                }
+            }
+            // DC blocking high-pass filters approximating the NES analog stages.
+            let y1 = a1 * (self.hp1_y + m - self.hp1_x);
+            self.hp1_x = m;
+            self.hp1_y = y1;
+            let y2 = a2 * (self.hp2_y + y1 - self.hp2_x);
+            self.hp2_x = y1;
+            self.hp2_y = y2;
+            let y3 = self.lp_y + a3 * (y2 - self.lp_y);
+            self.lp_y = y3;
+            let v = (y3 * s_scale).clamp(-32768.0, 32767.0) as i16;
             self.out.push(v);
         }
     }

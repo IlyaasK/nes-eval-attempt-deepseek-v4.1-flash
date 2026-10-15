@@ -3,6 +3,7 @@
 use crate::ines::*;
 
 pub trait Mapper {
+    fn as_any(&self) -> Option<&dyn core::any::Any> { None }
     fn prg_read(&mut self, addr: u16) -> u8;
     fn prg_write(&mut self, addr: u16, val: u8);
     fn chr_read(&mut self, addr: u16) -> u8;
@@ -478,14 +479,18 @@ pub struct Mmc3 {
     chr_mode: bool,
     ram_enabled: bool,
     ram_writable: bool,
-    irq_latch: u8,
-    irq_counter: u8,
-    irq_reload: bool,
-    irq_enabled: bool,
-    irq_pending: bool,
+    pub irq_latch: u8,
+    pub irq_counter: u8,
+    pub irq_reload: bool,
+    pub irq_enabled: bool,
+    pub irq_pending: bool,
     a12_low: bool,
     low_dots: u32,
     mirroring_dirty: bool,
+    #[cfg(feature = "trace")]
+    pub dot_count: u64,
+    #[cfg(feature = "trace")]
+    pub clock_count: u64,
     header_mirroring: u8,
     ppu_started: bool,
 }
@@ -511,6 +516,10 @@ impl Mmc3 {
             a12_low: true,
             low_dots: 0,
             mirroring_dirty: false,
+            #[cfg(feature = "trace")]
+            dot_count: 0,
+            #[cfg(feature = "trace")]
+            clock_count: 0,
             header_mirroring: mirror_from_header(cart.mirroring),
             ppu_started: false,
         }
@@ -562,6 +571,10 @@ impl Mmc3 {
     }
 
     fn clock_irq(&mut self) {
+        #[cfg(feature = "trace")]
+        {
+            self.clock_count += 1;
+        }
         if self.irq_counter == 0 || self.irq_reload {
             self.irq_counter = self.irq_latch;
             self.irq_reload = false;
@@ -575,6 +588,7 @@ impl Mmc3 {
 }
 
 impl Mapper for Mmc3 {
+    fn as_any(&self) -> Option<&dyn core::any::Any> { Some(self) }
     fn prg_read(&mut self, addr: u16) -> u8 {
         if addr >= 0x8000 {
             let bank = self.prg_bank(addr);
@@ -661,7 +675,17 @@ impl Mapper for Mmc3 {
     }
 
     fn ppu_dot(&mut self, addr: u16) {
+        #[cfg(feature = "trace")]
+        {
+            self.dot_count += 1;
+        }
         let a12 = (addr & 0x1000) != 0;
+        #[cfg(feature = "trace")]
+        {
+            if std::env::var("TRACE_MMC3").is_ok() && self.dot_count > 89000 && self.dot_count < 89060 {
+                eprintln!("dot {} addr={:04X} a12={} low_dots={}", self.dot_count, addr, a12 as u8, self.low_dots);
+            }
+        }
         if a12 {
             if self.a12_low && self.low_dots >= 3 {
                 self.clock_irq();

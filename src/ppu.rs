@@ -91,6 +91,8 @@ pub struct Ppu {
     nmi_suppress: bool,
     /// Last value written to $2007 (used for palette read back-bus bits).
     pub oam_addr_write_during_render: bool,
+    /// Current value driven on the PPU address bus (for mapper A12 tracking).
+    bus_addr: u16,
 }
 
 impl Ppu {
@@ -135,6 +137,7 @@ impl Ppu {
             vbl_suppress: false,
             nmi_suppress: false,
             oam_addr_write_during_render: false,
+            bus_addr: 0,
         }
     }
 
@@ -204,6 +207,7 @@ impl Ppu {
 
     #[inline]
     pub fn vram_read(&mut self, addr: u16, mapper: &mut dyn Mapper) -> u8 {
+        self.bus_addr = addr & 0x3FFF;
         let a = addr & 0x3FFF;
         if a < 0x2000 {
             mapper.chr_read(a)
@@ -297,6 +301,7 @@ impl Ppu {
             }
             7 => {
                 let addr = self.v & 0x3FFF;
+                self.bus_addr = addr;
                 if addr & 0x3F00 == 0x3F00 {
                     let idx = Self::pal_index(addr);
                     let pal = self.palette[idx] & 0x3F;
@@ -386,6 +391,15 @@ impl Ppu {
     pub fn process_dot(&mut self, mapper: &mut dyn Mapper) {
         let sl = self.scanline;
         let dot = self.dot;
+        // The mapper sees the PPU address bus on every dot (MMC3 A12 clocking).
+        if self.rendering_enabled() {
+            let a = self.bus_addr;
+            mapper.ppu_dot(a);
+        } else {
+            let a = self.v & 0x3FFF;
+            self.bus_addr = a;
+            mapper.ppu_dot(a);
+        }
 
         if sl == 241 && dot == 1 {
             if !self.vbl_suppress {

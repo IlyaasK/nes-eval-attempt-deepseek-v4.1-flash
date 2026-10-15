@@ -50,6 +50,12 @@ fn main() {
             "--prgram" => {
                 i += 1;
             }
+            "--audio-debug" => {
+                i += 1;
+            }
+            "--mixdump" => {
+                i += 1;
+            }
             "--bench" => {
                 bench = true;
                 i += 1;
@@ -88,6 +94,9 @@ fn main() {
             if wav.is_some() {
                 all_audio.extend_from_slice(&sys.out);
             }
+        }
+        if std::env::args().any(|a| a == "--audio-debug") {
+            eprintln!("frame {}: cycles={} samples={}", f, sys.cycles, sys.out.len());
         }
         sys.out.clear();
         if std::env::args().any(|a| a == "--prgram") && f % 10 == 9 {

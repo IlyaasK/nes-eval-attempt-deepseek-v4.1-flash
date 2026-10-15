@@ -17,6 +17,7 @@ const ROM_BUFFER_SIZE: usize = 8 * 1024 * 1024;
 pub struct Emu {
     pub system: System,
     pub rom: Vec<u8>,
+    pub rom_len: usize,
     pub audio: Vec<i16>,
 }
 
@@ -31,6 +32,7 @@ fn emu() -> &'static mut Emu {
             let e = Box::new(Emu {
                 system: System::new(Box::new(mapper::Null)),
                 rom,
+                rom_len: 0,
                 audio: Vec::with_capacity(16384),
             });
             EMU = Box::into_raw(e);
@@ -56,6 +58,7 @@ pub extern "C" fn emu_load_rom(len: c_int) -> c_int {
     if len <= 0 || len as usize > ROM_BUFFER_SIZE {
         return 0;
     }
+    e.rom_len = len as usize;
     let bytes = &e.rom[..len as usize];
     match ines::Cart::parse(bytes) {
         Some(cart) => match mapper::make_mapper(&cart) {
@@ -73,9 +76,13 @@ pub extern "C" fn emu_load_rom(len: c_int) -> c_int {
 #[no_mangle]
 pub extern "C" fn emu_reset() -> c_int {
     let e = emu();
-    e.system.power_on();
-    e.audio.clear();
-    1
+    if e.rom_len == 0 {
+        return 0;
+    }
+    // Cold boot: identical state to emu_load_rom, so the cartridge is rebuilt
+    // from the ROM image as well.
+    let len = e.rom_len;
+    emu_load_rom(len as c_int)
 }
 
 #[no_mangle]
