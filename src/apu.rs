@@ -232,9 +232,22 @@ impl Sweep {
         }
     }
 
-    /// Sweep muting condition: period < 8, or target period > $7FF.
+    /// Sweep muting condition: the current period is below 8, or the sweep is
+    /// enabled and its target period would overflow $7FF (or go negative).
     fn muting(&self, period: u16, pulse1: bool) -> bool {
-        period < 8 || self.target_period(period, pulse1) > 0x7FF
+        if period < 8 {
+            return true;
+        }
+        if !self.enabled {
+            return false;
+        }
+        let change = (period >> (self.shift & 0x07)) as i32;
+        let t = if self.negate {
+            period as i32 - change - if pulse1 { 1 } else { 0 }
+        } else {
+            period as i32 + change
+        };
+        t > 0x7FF || t < 0
     }
 }
 
@@ -910,6 +923,19 @@ impl Apu {
     }
 
     // -- extra introspection (not part of the frozen interface) -------------
+
+    /// Pulse 1's period and the sweep's target period (diagnostics).
+    pub fn pulse1_debug(&self) -> (u16, u8, u8, u8, u8, u8) {
+        let p = self.pulse[0].timer_period & 0x7FF;
+        (
+            p,
+            self.pulse[0].envelope.decay,
+            self.pulse[0].constant_volume as u8,
+            self.pulse[0].constant_volume as u8,
+            self.pulse[0].sweep.enabled as u8 | ((self.pulse[0].sweep.shift as u8) << 4),
+            self.pulse[0].sweep.muting(p, true) as u8,
+        )
+    }
 
     /// Raw DAC value of a channel: 0=pulse1, 1=pulse2, 2=triangle, 3=noise,
     /// 4=DMC (0..127 for the DMC, 0..15 for the others).

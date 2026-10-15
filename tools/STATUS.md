@@ -100,3 +100,25 @@ per-frame sample counts match the reference (0, then 733-734 per frame).
 * Sprite pattern fetches on dots 4 and 6 of the sprite fetch group also put
   their address on the PPU bus; the MMC3 watches A12 for IRQ clocking, so
   skipping those two dummy reads moved every A12 rise one dot late.
+
+## Session log (video/audio debugging, continued)
+* `ppu_open_bus.nes` passes after the full-byte open-bus/decay rework (above).
+* `NMI_PHASE` default is now 0 (sampling the NMI line on the first dot of the
+  CPU cycle): `ppu_vbl_nmi__06-suppression` passes with it, and the four games
+  keep the same frame-exactness (599/600, 599/600, 596/600 on 600 frames).
+* MMC3 sprite pattern fetches now put their address on the PPU bus on dots 4
+  and 6 of the fetch group (A12 watchers).  `mmc3_test_2__4-scanline_timing`
+  still fails its first check ("scanline 0 IRQ should occur sooner with
+  $2000=$08"); the check compares the scanline read back after the IRQ with
+  $21, so the remaining difference is a dot-level A12/IRQ-count alignment.
+* `ppu_vbl_nmi__10-even_odd_timing` "clock skipped too late" with the skip
+  decision at dot 340 and "too soon" at dot 339 (knob `ODD_SKIP_DOT`), so the
+  reference decides between the two.
+* APU: the pulse sweep's mute is gated on the sweep enable bit and includes the
+  negative-target case.  file-fixers' music uses a *disabled* sweep with a
+  period whose doubling would overflow $7FF, and the reference keeps playing,
+  so the unconditional target-period mute was silencing whole notes.
+* Per-channel dump: `nesrun --chdump file` (9 bytes/sample: 5 channel DACs,
+  4 length counters) with `CHDUMP=1` in trace builds.
+* file-fixers/stallar audio differ from the reference (rms ~300-1100); the
+  remaining differences are per-note, not a constant delay (alignment scan).

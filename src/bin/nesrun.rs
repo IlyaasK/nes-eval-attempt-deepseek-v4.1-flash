@@ -16,6 +16,7 @@ fn main() {
     let frames: u64 = args[2].parse().expect("frames");
     let mut out_dir: Option<String> = None;
     let mut wav: Option<String> = None;
+    let mut chdump: Option<String> = None;
     let mut keys: u32 = 0;
     let mut from: u64 = 0;
     let mut bench = false;
@@ -34,6 +35,10 @@ fn main() {
             }
             "--wav" => {
                 wav = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "--chdump" => {
+                chdump = Some(args[i + 1].clone());
                 i += 2;
             }
             "--keys" => {
@@ -252,6 +257,31 @@ fn main() {
             elapsed.as_secs_f64(),
             frames as f64 / elapsed.as_secs_f64()
         );
+    }
+
+    if let Some(path) = &chdump {
+        #[cfg(feature = "trace")]
+        {
+            let mut f = std::fs::File::create(path).expect("create chdump");
+            let n = sys.ch_dump[0].len();
+            for i in 0..n {
+                let mut row = [0u8; 9];
+                for c in 0..5 {
+                    row[c] = sys.ch_dump[c].get(i).copied().unwrap_or(0);
+                }
+                for c in 0..4 {
+                    row[5 + c] = sys.len_dump[c].get(i).copied().unwrap_or(0);
+                }
+                if let Some((per, decay, cv, vol, sw, mute)) = sys.p1_dump.get(i) {
+                    row[7] = (per & 0xFF) as u8;
+                    row[8] = *decay;
+                    let _ = (cv, vol, sw, mute);
+                }
+                f.write_all(&row).unwrap();
+            }
+        }
+        #[cfg(not(feature = "trace"))]
+        let _ = path;
     }
 
     if let Some(path) = &wav {

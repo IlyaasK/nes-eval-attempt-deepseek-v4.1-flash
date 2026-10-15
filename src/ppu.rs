@@ -89,6 +89,21 @@ fn vbl_set_dot() -> u16 {
     unsafe { VBL_SET_DOT }
 }
 
+static mut ODD_SKIP_IMMEDIATE: bool = true;
+#[cfg(feature = "trace")]
+fn odd_skip_immediate() -> bool {
+    unsafe {
+        if let Ok(v) = std::env::var("ODD_SKIP_IMM") {
+            ODD_SKIP_IMMEDIATE = v != "0";
+        }
+        ODD_SKIP_IMMEDIATE
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn odd_skip_immediate() -> bool {
+    unsafe { ODD_SKIP_IMMEDIATE }
+}
+
 /// Dot of scanline 261 on which an odd frame's skip is decided.
 static mut ODD_SKIP_DOT: u16 = 339;
 #[cfg(feature = "trace")]
@@ -658,6 +673,20 @@ impl Ppu {
             }
             _ => {}
         }
+    }
+
+    /// Whether rendering is enabled right now according to the mask including
+    /// writes that are still in the two-dot pipeline (used by the odd-frame
+    /// skip decision, which the reference makes on the write itself).
+    fn rendering_enabled_immediate(&self) -> bool {
+        let mut m = self.mask;
+        for i in 0..self.reg_queue_n as usize {
+            let (_, reg, val) = self.reg_queue[i];
+            if reg == 1 {
+                m = val;
+            }
+        }
+        m & 0x18 != 0
     }
 
     fn increment_vram_addr(&mut self) {
@@ -1358,7 +1387,7 @@ impl Ppu {
         } else if self.scanline == 261
             && self.odd_frame
             && self.dot == odd_skip_dot()
-            && self.rendering_enabled()
+            && if odd_skip_immediate() { self.rendering_enabled_immediate() } else { self.rendering_enabled() }
         {
             // Odd frames skip the last dot of the pre-render scanline.
             self.dot = 0;

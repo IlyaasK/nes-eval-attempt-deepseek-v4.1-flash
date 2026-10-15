@@ -96,7 +96,7 @@ fn nmi_latch_dots() -> u32 {
 }
 
 /// Which dot of the three-dot CPU cycle samples the NMI line (0, 1, or 2).
-static mut NMI_SAMPLE_PHASE: u32 = 2;
+static mut NMI_SAMPLE_PHASE: u32 = 0;
 #[cfg(feature = "trace")]
 fn nmi_sample_phase() -> u32 {
     unsafe {
@@ -183,6 +183,12 @@ pub struct System {
     pub mix_dump: Vec<f32>,
     #[cfg(feature = "trace")]
     pub y3_dump: Vec<f32>,
+    #[cfg(feature = "trace")]
+    pub ch_dump: [Vec<u8>; 5],
+    #[cfg(feature = "trace")]
+    pub len_dump: [Vec<u8>; 4],
+    #[cfg(feature = "trace")]
+    pub p1_dump: Vec<(u16, u8, u8, u8, u8, u8)>,
     /// Chain output at the previous output sample (for interpolation).
     prev_y3: f64,
     /// High-pass filter states (DC blockers) and low-pass state.
@@ -222,6 +228,12 @@ impl System {
             #[cfg(feature = "trace")]
             mix_dump: Vec::new(),
             #[cfg(feature = "trace")]
+            ch_dump: [Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new()],
+            #[cfg(feature = "trace")]
+            len_dump: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
+            #[cfg(feature = "trace")]
+            p1_dump: Vec::new(),
+            #[cfg(feature = "trace")]
             y3_dump: Vec::new(),
             prev_y3: 0.0,
             hp1_x: 0.0,
@@ -257,7 +269,12 @@ impl System {
         self.first_frame = true;
         self.out.clear();
         #[cfg(feature = "trace")]
-        self.mix_dump.clear();
+        {
+            self.mix_dump.clear();
+            self.ch_dump = [Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+            self.len_dump = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+            self.p1_dump.clear();
+        }
         self.audio_acc = AUDIO_START_DELAY;
         self.prev_y3 = 0.0;
         self.hp1_x = 0.0;
@@ -663,6 +680,16 @@ impl System {
             {
                 if std::env::var("MIXDUMP").is_ok() {
                     self.mix_dump.push(m as f32);
+                }
+                if std::env::var("CHDUMP").is_ok() {
+                    for c in 0..5 {
+                        self.ch_dump[c].push(self.apu.channel_dac(c));
+                    }
+                    for c in 0..4 {
+                        self.len_dump[c].push(self.apu.length_counter(c));
+                    }
+                    let (per, decay, cv, vol, sw, mute) = self.apu.pulse1_debug();
+                    self.p1_dump.push((per, decay, cv, vol, sw, mute));
                 }
             }
             // DC blocking high-pass filters approximating the NES analog stages.
