@@ -234,3 +234,47 @@ threshold (write dot + REG_DELAY <= decide dot) is unchanged.  Measured:
 
 With REG_DELAY=0 and ODD_DECIDE_DOT=337 the whole ppu_vbl_nmi set
 02/03/04/06/07/08/09/10 passes.
+
+# Session summary (this round)
+
+## Fixes landed
+1. **$2005 second write wrote the Y scroll into the X bits** (also clobbering
+   coarse X).  Any ROM setting its scroll with $2005 (X then Y) rendered the
+   wrong nametable region; interrupt-test screens were blank.  Fixed to set
+   coarse Y (bits 5-9) and fine Y (bits 12-14).
+2. **REG_DELAY 2 -> 0** (PPU register write latency).  With 2 the NMI tests
+   fired two dots late: vbl 07 gave "00 N | 01 N | 02 - ..." (ref 0-4 N) and 08
+   "03 - | 04 N | ..." (ref 07+ N).  With 0/1 both match exactly.
+3. **ODD_DECIDE_DOT 338 -> 337** to keep the odd-frame skip's effective
+   threshold (write dot + REG_DELAY <= decide dot) unchanged; DECIDE 337 is the
+   unique passing value with REG_DELAY=0.
+4. **NOISE_WEIGHT 2 -> 1** (mixer noise term).  The reference's noise output is
+   half the classic TND weight: noise-only probe ratio 2.0x -> 1.0x at long
+   periods, and game audio improves on every metric:
+   file-fixers rms 318 -> 262, corr 0.951 -> 0.967;
+   stallar rms 269 -> 215, corr 0.850 -> 0.901.
+
+## Test status (with these fixes)
+Passing: ppu_vbl_nmi **02/03/04/06/07/08/09/10** (all eight), ppu_open_bus,
+cpu_interrupts_v2__1, all five apu_test ROMs, mmc3_test_2__2,
+cpu_reset__registers; branch_timing_tests__1 399/400 frame-exact.
+Games at 1000 frames: robotfindskitten 999/1000, rhde 998/1000,
+file-fixers 996/1000, stallar 992/1000 (remaining diffs are the 2-pixel
+row-0 frame-boundary artifact).
+Audio at 600 frames: robotfindskitten 99.86% equal (rms 31), rhde 99.73%
+(rms 33), file-fixers 53% equal but corr 0.967 (rms 262), stallar corr 0.901
+(rms 215).
+
+## Still open
+* `instr_timing` hangs in its final phase (screen matches the reference exactly
+  for the first 1300 frames; the reference prints "All 2 tests passed" at
+  ~frame 1300, ours never prints).  The ROM waits in loops around $AFBD-$B000
+  and $E440-$E460; the divergence is in a timing-measurement wait.
+* `cpu_interrupts_v2__3` table rows (mining the NMI/IRQ interaction).
+* `mmc3_test_2__4` ("Scanline 0 IRQ should occur sooner when $2000=$08");
+  A12_LOW_DOTS 2/3/6/9/12 all fail, so it is not the filter width.
+* sprite_hit_tests__02 / sprite_overflow_tests__2 print their title 2-3 frames
+  earlier than the reference (their verdicts match).
+* The 2-pixel column at the start of row 0 on frames where the palette changes
+  (frame boundary cuts inside scanline 0; FRAME_EXTRA=0 is the best of the
+  tested offsets).
