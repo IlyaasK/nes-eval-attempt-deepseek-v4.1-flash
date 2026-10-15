@@ -65,6 +65,50 @@ start:
         sta $2001
         jsr vwait
         jsr vwait
+        ; CHR RAM: tile 1 pattern = readable diagonal, tile 0 = solid colour 3
+        lda #$00
+        sta $2006
+        lda #$00
+        sta $2006
+        ldx #$00
+p0:     lda #$FF
+        sta $2007
+        inx
+        cpx #$10
+        bne p0
+        ldx #$00
+p1:     lda #$80
+        sta $2007
+        lda #$00
+        sta $2007
+        lda #$40
+        sta $2007
+        lda #$00
+        sta $2007
+        lda #$20
+        sta $2007
+        lda #$00
+        sta $2007
+        lda #$10
+        sta $2007
+        lda #$00
+        sta $2007
+        lda #$08
+        sta $2007
+        lda #$00
+        sta $2007
+        lda #$04
+        sta $2007
+        lda #$00
+        sta $2007
+        lda #$02
+        sta $2007
+        lda #$00
+        sta $2007
+        lda #$01
+        sta $2007
+        lda #$00
+        sta $2007
         ; palette 0: backdrop $0F, colour 1 $30, colour 2 $16, colour 3 $29
         lda #$3F
         sta $2006
@@ -94,7 +138,7 @@ start:
         sta $2003
         lda #$02
         sta $4014
-        ; background: nametable all tile 1, attribute 0
+        ; background: nametable all tile 1 (tile 1 = diagonal), attribute 0
         lda #$20
         sta $2006
         lda #$00

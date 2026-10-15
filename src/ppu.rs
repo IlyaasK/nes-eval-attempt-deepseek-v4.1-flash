@@ -16,10 +16,10 @@ use crate::mapper::Mapper;
 
 /// Which PPU dot a $2002 read suppresses the vblank set on:
 /// bit 0 = the dot before the set (240,340), bit 1 = the set dot (241,0).
-static mut VBL_SUPPRESS_MODE: u32 = 16;
+static mut VBL_SUPPRESS_MODE: u32 = 1;
 /// Dot of scanline 241 on which the vblank flag is set (the documentation's
 /// dot 1; reads on the dot before it clear and drop the flag).
-static mut VBL_SET_DOT: u16 = 1;
+static mut VBL_SET_DOT: u16 = 0;
 #[cfg(feature = "trace")]
 fn vbl_set_dot() -> u16 {
     unsafe {
@@ -34,6 +34,24 @@ fn vbl_set_dot() -> u16 {
 #[cfg(not(feature = "trace"))]
 fn vbl_set_dot() -> u16 {
     unsafe { VBL_SET_DOT }
+}
+
+/// Dot of scanline 261 on which the vblank and sprite flags are cleared.
+static mut VBL_CLEAR_DOT: u16 = 0;
+#[cfg(feature = "trace")]
+fn vbl_clear_dot() -> u16 {
+    unsafe {
+        if let Ok(v) = std::env::var("VBL_CLEAR_DOT") {
+            if let Ok(n) = v.parse::<u16>() {
+                VBL_CLEAR_DOT = n;
+            }
+        }
+        VBL_CLEAR_DOT
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn vbl_clear_dot() -> u16 {
+    unsafe { VBL_CLEAR_DOT }
 }
 
 /// Dot of scanline 241 on which a $2002 read drops the vblank flag.
@@ -178,6 +196,10 @@ pub struct Ppu {
     nmi_suppress: bool,
     /// Last value written to $2007 (used for palette read back-bus bits).
     pub oam_addr_write_during_render: bool,
+    /// Palette writes take effect a couple of PPU dots after the CPU write;
+    /// the reference shows exactly a two-dot delay on the rendered output.
+    pending_pal: [(u64, u8, u8); 4],
+    pending_pal_n: u8,
     /// Current value driven on the PPU address bus (for mapper A12 tracking).
     bus_addr: u16,
     /// Debug: sprite unit 0 state at the end of the last frame.
@@ -205,6 +227,8 @@ impl Ppu {
             w: false,
             read_buffer: 0,
             open_bus: 0,
+            pending_pal: [(0, 0, 0); 4],
+            pending_pal_n: 0,
             scanline: 0,
             dot: 0,
             frame: 0,
@@ -318,10 +342,6 @@ impl Ppu {
 
     #[inline]
     pub fn vram_write(&mut self, addr: u16, val: u8, mapper: &mut dyn Mapper) {
-        if self.rendering_enabled() && self.scanline < 240 && self.dot < 256 {
-            // Writes to VRAM during rendering cannot modify nametables reliably;
-            // the data is written to the address currently on the bus.
-        }
         let a = addr & 0x3FFF;
         if a < 0x2000 {
             mapper.chr_write(a, val);
@@ -330,7 +350,34 @@ impl Ppu {
             self.vram[idx & 4095] = val;
         } else {
             let idx = Self::pal_index(a);
-            self.palette[idx] = val & 0x3F;
+            // The write reaches palette RAM two PPU dots later.
+            let n = self.pending_pal_n as usize;
+            if n < self.pending_pal.len() {
+                self.pending_pal[n] = (self.total_dots + 8, idx as u8, val);
+                self.pending_pal_n += 1;
+            } else {
+                self.palette[idx] = val & 0x3F;
+            }
+        }
+    }
+
+    /// Apply palette writes whose two-dot pipeline delay has elapsed.
+    fn flush_palette(&mut self) {
+        if self.pending_pal_n == 0 {
+            return;
+        }
+        let now = self.total_dots;
+        let mut i = 0;
+        while i < self.pending_pal_n as usize {
+            let (due, idx, val) = self.pending_pal[i];
+            if due <= now {
+                self.palette[idx as usize] = val & 0x3F;
+                let last = self.pending_pal_n as usize - 1;
+                self.pending_pal[i] = self.pending_pal[last];
+                self.pending_pal_n -= 1;
+            } else {
+                i += 1;
+            }
         }
     }
 
@@ -502,6 +549,7 @@ impl Ppu {
     // ------------------------------------------------------------ timing ---
 
     pub fn process_dot(&mut self, mapper: &mut dyn Mapper) {
+        self.flush_palette();
         let sl = self.scanline;
         let dot = self.dot;
         // The mapper sees the PPU address bus on every dot (MMC3 A12 clocking).
@@ -523,7 +571,7 @@ impl Ppu {
         if vbl_set_dot() != 0 && sl == 241 && dot == 0 {
             self.vbl_suppress = false;
         }
-        if sl == 261 && dot == 0 {
+        if sl == 261 && dot == vbl_clear_dot() {
             // Cleared exactly 6820 PPU clocks (20 scanlines) after the set.
             self.status &= !0xE0;
             self.nmi_suppress = false;
@@ -617,6 +665,21 @@ impl Ppu {
                 }
 
                 // --------------------------------------------------- pixel ---
+                #[cfg(feature = "trace")]
+                {
+                    if std::env::var("TRACE_ALLPX").is_ok() && dot == 1 && sl < 2 {
+                        eprintln!("procpx sl={} dot={}", sl, dot);
+                    }
+                    if std::env::var("TRACE_SL").is_ok() && dot == 1 && sl < 4 && self.frame == 3 {
+                        eprintln!("proc sl={} dot={} rendering={}", sl, dot, rendering);
+                    }
+                }
+                #[cfg(feature = "trace")]
+                {
+                    if std::env::var("TRACE_PRE").is_ok() && dot == 1 && sl < 2 {
+                        eprintln!("PRE sl={} dot={}", sl, dot);
+                    }
+                }
                 if sl <= 239 && (1..=256).contains(&dot) {
                     #[cfg(feature = "trace")]
                     {
@@ -626,7 +689,7 @@ impl Ppu {
                                 sl, dot, s0.x, s0.attr, s0.lo, s0.hi, self.sec_oam[0], self.sec_oam[1], self.sec_oam[2], self.sec_oam[3]);
                         }
                     }
-                    self.render_pixel(mapper);
+                    if std::env::var("TRACE_NOREND").is_err() { self.render_pixel(mapper); }
                 }
                 // The shift registers also shift during the prefetch phase.
                 if (320..=336).contains(&dot) {
@@ -671,6 +734,15 @@ impl Ppu {
                 }
             } else {
                 // Rendering disabled: output the backdrop (or palette-RAM override).
+                #[cfg(feature = "trace")]
+                {
+                    if std::env::var("TRACE_ALLPX").is_ok() && dot == 1 && sl < 2 {
+                        eprintln!("procpx sl={} dot={}", sl, dot);
+                    }
+                    if std::env::var("TRACE_SL").is_ok() && dot == 1 && sl < 4 && self.frame == 3 {
+                        eprintln!("proc sl={} dot={} rendering={}", sl, dot, rendering);
+                    }
+                }
                 if sl <= 239 && (1..=256).contains(&dot) {
                     let x = (dot - 1) as usize;
                     let colour = self.backdrop_colour();
@@ -734,8 +806,9 @@ impl Ppu {
         let tile = self.sec_oam[idx * 4 + 1];
         let attr = self.sec_oam[idx * 4 + 2];
         // Row within the sprite for the scanline being prepared (scanline + 1).
+        // The sprite was selected because it is in range, so scanline >= y here.
         let diff = self.scanline.wrapping_sub(y) & 0xFF;
-        let mut row = diff as u8;
+        let mut row = if self.scanline >= y { diff as u8 } else { 0 };
         if tall {
             row &= 0x0F;
             if attr & 0x80 != 0 {
@@ -772,7 +845,7 @@ impl Ppu {
         let x = (self.dot - 1) as u8;
         #[cfg(feature = "trace")]
         {
-            if std::env::var("TRACE_ALLPX").is_ok() && self.scanline == 1 && x < 3 {
+            if std::env::var("TRACE_ALLPX").is_ok() && self.total_dots < 90000 && self.scanline < 2 {
                 eprintln!("allpx sl=1 dot={} x={}", self.dot, x);
             }
         }
@@ -800,14 +873,15 @@ impl Ppu {
             for i in 0..8 {
                 // Row index within the sprite for this scanline (a sprite with
                 // OAM Y == y occupies scanlines y+1 .. y+height).
-                let row = self
-                    .scanline
-                    .wrapping_sub(self.sprites[i].y as u16)
-                    .wrapping_sub(1)
-                    & 0xFF;
-                if row >= height {
+                // Row within the sprite for this scanline; the sprite window
+                // does not wrap, so sprites starting at or past line 239 never
+                // draw (and never set the hit flag).
+                let sy = self.sprites[i].y as u16;
+                let line = self.scanline;
+                if line <= sy || line > sy + height {
                     continue;
                 }
+                let _row = line - sy - 1;
                 if self.sprites[i].x > 0 {
                     self.sprites[i].x -= 1;
                     continue;
@@ -916,10 +990,12 @@ impl Ppu {
 
     fn ev_in_range(&self, y: u8) -> bool {
         let height: u16 = if self.ctrl & 0x20 != 0 { 16 } else { 8 };
-        // Sprites with OAM Y == y are displayed on scanlines y+1 .. y+height, so
-        // the evaluation on scanline L selects them when L - y < height.
-        let diff = self.scanline.wrapping_sub(y as u16) & 0xFF;
-        diff < height
+        // Sprites with OAM Y == y are displayed on scanlines y+1 .. y+height.
+        // The comparison does not wrap: a sprite whose window starts beyond the
+        // visible area (Y >= 239) is never displayed.
+        let line = self.scanline + 1;
+        let y = y as u16;
+        line > y && line <= y + height
     }
 
     fn evaluate_sprite_step(&mut self) {
@@ -984,7 +1060,9 @@ impl Ppu {
                     self.ev_m = (m % 4) as u8;
                 } else {
                     self.ev_n = self.ev_n.wrapping_add(1);
-                    self.ev_m = self.ev_m.wrapping_add(1);
+                    // m is a two-bit counter: it wraps within the sprite entry
+                    // rather than carrying into n.
+                    self.ev_m = (self.ev_m + 1) & 3;
                 }
                 if self.ev_n >= 64 {
                     self.ev_mode = EvMode::Done;

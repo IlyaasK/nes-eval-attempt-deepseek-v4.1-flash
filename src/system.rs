@@ -243,7 +243,7 @@ impl System {
             self.cpu.irq_seen = true;
         }
         self.apu.clock(self.cycles);
-        for _ in 0..(2 - ACCESS_PHASE) {
+        for _ in 0..(2u32.saturating_sub(ACCESS_PHASE)) {
             self.clock_dot(None);
         }
         self.cycles += 1;
@@ -302,7 +302,7 @@ impl System {
         }
         let v = self.clock_dot(access);
         self.apu.clock(self.cycles);
-        for _ in 0..(2 - ACCESS_PHASE) {
+        for _ in 0..(2u32.saturating_sub(ACCESS_PHASE)) {
             self.clock_dot(None);
         }
         self.cycles += 1;
