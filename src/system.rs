@@ -103,6 +103,9 @@ pub struct System {
     /// of the next CPU cycle (hardware's edge detector output appears one cycle
     /// after the edge is seen on the line).
     nmi_latch: bool,
+    /// IRQ line and I-flag state as sampled at the end of the previous cycle.
+    irq_prev_line: bool,
+    irq_prev_i: bool,
     oam_dma: Option<OamDma>,
 
     /// Pending access to repeat on DMA halt cycles.
@@ -144,6 +147,8 @@ impl System {
             cycles: 0,
             prev_nmi: false,
             nmi_latch: false,
+            irq_prev_line: false,
+            irq_prev_i: false,
             oam_dma: None,
             halt_addr: 0,
             first_frame: true,
@@ -181,6 +186,8 @@ impl System {
         self.cycles = 0;
         self.prev_nmi = false;
         self.nmi_latch = false;
+        self.irq_prev_line = false;
+        self.irq_prev_i = false;
         self.oam_dma = None;
         self.halt_addr = 0;
         self.first_frame = true;
@@ -238,10 +245,15 @@ impl System {
     #[inline]
     fn raw_cycle(&mut self, access: Option<Access>) -> u8 {
         let v = self.clock_dot(access);
-        // The IRQ input is level-sensitive and polled every CPU cycle.
-        if self.irq_line() && !self.cpu.flag(crate::cpu::FLAG_I) {
+        // The IRQ input is level-sensitive.  The CPU polls it during the
+        // cycle before an instruction's last cycle, so the state latched here
+        // is one cycle old when the instruction ends; that reproduces the
+        // one-instruction delay of CLI without delaying PLP/RTI.
+        if self.irq_prev_line && self.irq_prev_i {
             self.cpu.irq_seen = true;
         }
+        self.irq_prev_line = self.irq_line();
+        self.irq_prev_i = !self.cpu.flag(crate::cpu::FLAG_I);
         self.apu.clock(self.cycles);
         for _ in 0..(2u32.saturating_sub(ACCESS_PHASE)) {
             self.clock_dot(None);
@@ -394,6 +406,9 @@ impl System {
     fn bus_write(&mut self, addr: u16, val: u8) {
         #[cfg(feature = "trace")]
         {
+            if std::env::var("APU_TRACE").is_ok() && ((0x4000..=0x4017).contains(&addr)) {
+                eprintln!("A {:04X} <- {:02X} @{}", addr, val, self.cycles);
+            }
             if std::env::var("WRITE_TRACE").is_ok() && ((0x2000..=0x2007).contains(&addr) || addr == 0x4014) {
                 if addr == 0x2007 {
                     eprintln!("W 2007 <- {:02X} @{} v={:04X} mask={:02X} sl={} dot={}", val, self.cycles, self.ppu.v, self.ppu.mask, self.ppu.scanline, self.ppu.dot);

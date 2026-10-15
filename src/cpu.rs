@@ -32,6 +32,9 @@ pub struct Cpu {
     /// True when the interrupt lines were polled high with I clear during an
     /// instruction; consulted at the instruction boundary.
     pub irq_seen: bool,
+    /// Set by CLI/PLP/RTI: the I flag change only affects interrupt polling
+    /// starting with the instruction after the next one.
+    pub irq_delay: bool,
     /// Number of cycles executed in the current instruction.
     pub instr_cycles: u32,
     /// Set while executing an interrupt sequence: no polling happens there.
@@ -55,6 +58,7 @@ impl Cpu {
             nmi_pending: false,
             irq_level_latched: false,
             irq_seen: false,
+            irq_delay: false,
             instr_cycles: 0,
             in_interrupt: false,
             bus_latch: 0,
@@ -498,7 +502,7 @@ impl System {
             self.interrupt_sequence(0xFFFA, false);
             return;
         }
-        if self.cpu.irq_seen {
+        if self.cpu.irq_seen && !self.cpu.flag(FLAG_I) {
             let line = self.irq_line();
             if line {
                 self.interrupt_sequence(0xFFFE, false);
@@ -507,6 +511,7 @@ impl System {
             self.cpu.irq_seen = false;
         }
         self.cpu.irq_seen = false;
+        self.cpu.irq_delay = false;
         let op = self.fetch();
         self.execute(op);
     }
@@ -1200,11 +1205,7 @@ impl System {
                 let lo = self.pop() as u16;
                 let hi = self.pop() as u16;
                 self.cpu.pc = (hi << 8) | lo;
-                // RTI makes the restored I flag visible to interrupt polling
-                // in the same cycle.
-                if self.cpu.irq_level_latched && !self.cpu.flag(FLAG_I) {
-                    self.cpu.irq_seen = true;
-                }
+
             }
             // ---- Branches
             0x10 => self.branch(!self.cpu.flag(FLAG_N)),

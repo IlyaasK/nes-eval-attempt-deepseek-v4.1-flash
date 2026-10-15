@@ -23,6 +23,8 @@ fn main() {
     let mut dumpvram: Option<String> = None;
     let mut oam = false;
     let mut hot = false;
+    let mut replay: Option<String> = None;
+    let mut key_changes: Vec<(u64, u32)> = Vec::new();
     let mut i = 3;
     while i < args.len() {
         match args[i].as_str() {
@@ -75,6 +77,10 @@ fn main() {
                 oam = true;
                 i += 1;
             }
+            "--replay" => {
+                replay = Some(args[i + 1].clone());
+                i += 2;
+            }
             "--hot" => {
                 hot = true;
                 i += 1;
@@ -100,6 +106,24 @@ fn main() {
         std::fs::create_dir_all(dir).ok();
     }
 
+    if let Some(path) = &replay {
+        if let Ok(text) = std::fs::read_to_string(path) {
+            for line in text.lines() {
+                let line = line.split('#').next().unwrap_or("").trim();
+                if line.is_empty() {
+                    continue;
+                }
+                let mut it = line.split_whitespace();
+                if let (Some(f), Some(k)) = (it.next(), it.next()) {
+                    if let (Ok(f), Ok(k)) = (f.parse::<u64>(), u32::from_str_radix(k, 16)) {
+                        key_changes.push((f, k));
+                    }
+                }
+            }
+            key_changes.sort();
+        }
+    }
+    let mut ki = 0usize;
     let mut all_audio: Vec<i16> = Vec::new();
     let start = std::time::Instant::now();
     if hot {
@@ -107,6 +131,12 @@ fn main() {
         sys.hist.clear();
     }
     for f in 0..frames {
+        while ki < key_changes.len() && key_changes[ki].0 == f {
+            let k = key_changes[ki].1;
+            sys.keys[0] = (k & 0xFF) as u8;
+            sys.keys[1] = ((k >> 8) & 0xFF) as u8;
+            ki += 1;
+        }
         sys.run_frame();
         if f >= from {
             if let Some(dir) = &out_dir {

@@ -141,6 +141,35 @@ impl Envelope {
     }
 }
 
+static mut APU_IRQ_WRAP: bool = true;
+static mut APU_IRQ_14914: bool = true;
+#[cfg(feature = "trace")]
+fn apu_irq_wrap() -> bool {
+    unsafe {
+        if let Ok(v) = std::env::var("APU_IRQ_WRAP") {
+            APU_IRQ_WRAP = v != "0";
+        }
+        APU_IRQ_WRAP
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn apu_irq_wrap() -> bool {
+    unsafe { APU_IRQ_WRAP }
+}
+#[cfg(feature = "trace")]
+fn apu_irq_14914() -> bool {
+    unsafe {
+        if let Ok(v) = std::env::var("APU_IRQ_14914") {
+            APU_IRQ_14914 = v != "0";
+        }
+        APU_IRQ_14914
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn apu_irq_14914() -> bool {
+    unsafe { APU_IRQ_14914 }
+}
+
 // ---------------------------------------------------------------------------
 // Length counter
 // ---------------------------------------------------------------------------
@@ -599,6 +628,11 @@ impl Apu {
         let last = if self.frame.mode5 { 18641 } else { 14915 };
         if self.frame.cycle >= last {
             self.frame.cycle = 0;
+            // The frame interrupt flag is also set on the cycle the sequence
+            // wraps (APU cycle 14915 == 0 of the next sequence).
+            if !self.frame.mode5 && !self.frame.irq_inhibit && apu_irq_wrap() {
+                self.frame.irq_flag = true;
+            }
         }
         let cycle = self.frame.cycle;
 
@@ -629,7 +663,7 @@ impl Apu {
                 14914 => {
                     quarter = true;
                     half = true;
-                    if !self.frame.irq_inhibit {
+                    if !self.frame.irq_inhibit && apu_irq_14914() {
                         self.frame.irq_flag = true;
                     }
                 }

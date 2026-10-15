@@ -14,6 +14,9 @@
 use crate::ines::*;
 use crate::mapper::Mapper;
 
+/// How long the PPU's decay register keeps its value (about 600 ms).
+const DECAY_CYCLES: u32 = 600_000;
+
 /// Which PPU dot a $2002 read suppresses the vblank set on:
 /// bit 0 = the dot before the set (240,340), bit 1 = the set dot (241,0).
 static mut VBL_SUPPRESS_MODE: u32 = 1;
@@ -159,6 +162,8 @@ pub struct Ppu {
     read_buffer: u8,
     /// PPU open bus / decay register.
     pub open_bus: u8,
+    /// Cycles remaining before the decay register clears.
+    decay_timer: u32,
 
     // Timing
     pub scanline: u16,
@@ -200,6 +205,12 @@ pub struct Ppu {
     /// the reference shows exactly a two-dot delay on the rendered output.
     pending_pal: [(u64, u8, u8); 4],
     pending_pal_n: u8,
+    /// PPU dot at which the pending $2007 address increment applies (0 = none).
+    pending_v_inc: u64,
+    /// Delayed register writes ($2000/$2001/$2005/$2006): they reach the PPU
+    /// registers a couple of dots after the CPU write.
+    reg_queue: [(u64, u8, u8); 8],
+    reg_queue_n: u8,
     /// Current value driven on the PPU address bus (for mapper A12 tracking).
     bus_addr: u16,
     /// Debug: sprite unit 0 state at the end of the last frame.
@@ -227,8 +238,12 @@ impl Ppu {
             w: false,
             read_buffer: 0,
             open_bus: 0,
+            decay_timer: 0,
             pending_pal: [(0, 0, 0); 4],
             pending_pal_n: 0,
+            pending_v_inc: 0,
+            reg_queue: [(0, 0, 0); 8],
+            reg_queue_n: 0,
             scanline: 0,
             dot: 0,
             frame: 0,
@@ -272,6 +287,7 @@ impl Ppu {
         self.w = false;
         self.read_buffer = 0;
         self.open_bus = 0;
+        self.decay_timer = 0;
         self.scanline = 0;
         self.dot = 0;
         self.frame = 0;
@@ -353,11 +369,39 @@ impl Ppu {
             // The write reaches palette RAM two PPU dots later.
             let n = self.pending_pal_n as usize;
             if n < self.pending_pal.len() {
-                self.pending_pal[n] = (self.total_dots + 8, idx as u8, val);
+                self.pending_pal[n] = (self.total_dots + 4, idx as u8, val);
                 self.pending_pal_n += 1;
             } else {
                 self.palette[idx] = val & 0x3F;
             }
+        }
+    }
+
+    /// Apply queued register writes whose pipeline delay has elapsed.
+    fn flush_regs(&mut self, mapper: &mut dyn Mapper) {
+        if self.reg_queue_n == 0 {
+            return;
+        }
+        let now = self.total_dots;
+        let mut i = 0;
+        while i < self.reg_queue_n as usize {
+            let (due, reg, val) = self.reg_queue[i];
+            if due <= now {
+                self.apply_reg(reg, val, mapper);
+                let last = self.reg_queue_n as usize - 1;
+                self.reg_queue[i] = self.reg_queue[last];
+                self.reg_queue_n -= 1;
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    /// Apply the $2007 address increment once its pipeline delay has elapsed.
+    fn flush_v_inc(&mut self) {
+        if self.pending_v_inc != 0 && self.total_dots >= self.pending_v_inc {
+            self.pending_v_inc = 0;
+            self.increment_vram_addr();
         }
     }
 
@@ -481,12 +525,71 @@ impl Ppu {
     }
 
     #[inline]
+    /// Apply a (possibly delayed) write to one of the timing-critical
+    /// registers.
+    fn apply_reg(&mut self, reg: u8, val: u8, _mapper: &mut dyn Mapper) {
+        match reg {
+            0 => {
+                self.ctrl = val;
+                self.t = (self.t & 0xF3FF) | (((val as u16) & 0x03) << 10);
+            }
+            1 => {
+                self.mask = val;
+            }
+            5 => {
+                if !self.w {
+                    self.fine_x = val & 0x07;
+                    self.t = (self.t & 0x7FE0) | ((val as u16) >> 3);
+                    self.w = true;
+                } else {
+                    self.t = (self.t & 0x0C1F) | (((val as u16) & 0x07) << 12);
+                    self.t = (self.t & 0x7FE0) | ((val as u16) >> 3);
+                    self.w = false;
+                }
+            }
+            6 => {
+                if !self.w {
+                    self.t = (self.t & 0x00FF) | (((val as u16) & 0x3F) << 8);
+                    self.t &= 0x7FFF;
+                    self.w = true;
+                } else {
+                    self.t = (self.t & 0x7F00) | (val as u16);
+                    self.v = self.t;
+                    self.w = false;
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn increment_vram_addr(&mut self) {
         let inc = if self.ctrl & 0x04 != 0 { 32 } else { 1 };
         self.v = self.v.wrapping_add(inc) & 0x7FFF;
     }
 
     pub fn write_register(&mut self, addr: u16, val: u8, mapper: &mut dyn Mapper, warmup: bool) {
+        // Any write to $2000-$3FFF loads the PPU's decay register (bits 0-4),
+        // which $2002 reads return in its low bits.
+        self.open_bus = (self.open_bus & 0xC0) | (val & 0x1F);
+        self.decay_timer = DECAY_CYCLES;
+        // $2000/$2001/$2005/$2006 take effect two PPU dots after the write.
+        match addr & 7 {
+            0 | 1 | 5 | 6 => {
+                if warmup {
+                    return;
+                }
+                let n = self.reg_queue_n as usize;
+                let reg = (addr & 7) as u8;
+                if n < self.reg_queue.len() {
+                    self.reg_queue[n] = (self.total_dots + 2, reg, val);
+                    self.reg_queue_n += 1;
+                } else {
+                    self.apply_reg(reg, val, mapper);
+                }
+                return;
+            }
+            _ => {}
+        }
         match addr & 7 {
             0 => {
                 if warmup {
@@ -540,7 +643,7 @@ impl Ppu {
                 self.open_bus = val;
                 let addr = self.v & 0x3FFF;
                 self.vram_write(addr, val, mapper);
-                self.increment_vram_addr();
+                self.pending_v_inc = self.total_dots + 2;
             }
             _ => {}
         }
@@ -550,6 +653,14 @@ impl Ppu {
 
     pub fn process_dot(&mut self, mapper: &mut dyn Mapper) {
         self.flush_palette();
+        self.flush_v_inc();
+        self.flush_regs(mapper);
+        if self.decay_timer > 0 {
+            self.decay_timer -= 1;
+            if self.decay_timer == 0 {
+                self.open_bus &= 0xC0;
+            }
+        }
         let sl = self.scanline;
         let dot = self.dot;
         // The mapper sees the PPU address bus on every dot (MMC3 A12 clocking).
