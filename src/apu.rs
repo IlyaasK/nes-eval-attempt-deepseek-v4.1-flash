@@ -525,6 +525,24 @@ struct FrameCounter {
 // APU
 // ---------------------------------------------------------------------------
 
+/// Mixer weight of the noise channel (the classic TND formula uses 2).
+static mut NOISE_WEIGHT: usize = 2;
+#[cfg(feature = "trace")]
+fn noise_weight() -> usize {
+    unsafe {
+        if let Ok(v) = std::env::var("NOISE_WEIGHT") {
+            if let Ok(n) = v.parse::<usize>() {
+                NOISE_WEIGHT = n;
+            }
+        }
+        NOISE_WEIGHT
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn noise_weight() -> usize {
+    unsafe { NOISE_WEIGHT }
+}
+
 static mut MIX_DC: f32 = 0.0;
 
 pub struct Apu {
@@ -917,7 +935,7 @@ impl Apu {
     pub fn mix(&self) -> f32 {
         let pulses = (self.pulse[0].output(PULSE1) + self.pulse[1].output(PULSE2)) as usize;
         let tnd = 3 * self.triangle.output() as usize
-            + 2 * self.noise.output() as usize
+            + noise_weight() * self.noise.output() as usize
             + self.dmc.output_level as usize;
         self.pulse_table[pulses] + self.tnd_table[tnd]
     }

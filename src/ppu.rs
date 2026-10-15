@@ -98,7 +98,7 @@ fn vbl_set_dot() -> u16 {
 static mut ODD_SKIP_DOT: u16 = 340;
 /// Dot of scanline 261 at which the rendering-enabled state that decides the
 /// odd-frame skip is sampled.
-static mut ODD_DECIDE_DOT: u16 = 338;
+static mut ODD_DECIDE_DOT: u16 = 337;
 #[cfg(feature = "trace")]
 fn odd_decide_dot() -> u16 {
     unsafe {

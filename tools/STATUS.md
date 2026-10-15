@@ -211,3 +211,26 @@ interrupt tests' screens were blank; they now draw.  Fix:
   IRQ timing per $2000 pattern-table setting).
 * tools/readtext.py - decode a test ROM's text screen using the ROM's own font
   (auto-detects fine scroll); works on ROMs with CHR-ROM fonts.
+
+## REG_DELAY (register write latency) default changed 2 -> 0
+The delayed-register queue applied $2000/$2001/$2005/$2006 writes two PPU dots
+after the CPU write.  That is two dots too late for the NMI tests:
+
+    REG_DELAY=2 (old): 07 = "00 N | 01 N | 02 - | 03 - ..." (ref: 0-4 N)
+                       08 = "03 - | 04 N | 05 N ..."        (ref: 07+ N)
+    REG_DELAY=0 or 1:  07 = "00 N | 01 N | 02 N | 03 N | 04 N | 05 - ..." OK
+                       08 = "03 - | 04 - | 05 - | 06 - | 07 N ..."        OK
+
+Games are unchanged with REG_DELAY=0 (rfK 199/200, rhde 198/200,
+file-fixers 196/200 on 200 frames; 599/598/596/592 of 600 on 600 frames),
+so the default is now 0.
+
+## Odd-skip decision dot re-tuned for REG_DELAY=0
+With the register delay now 0, the odd-frame skip's rendering-enabled sample
+must move from dot 338 to dot 337 (`ODD_DECIDE_DOT`), i.e. the *effective*
+threshold (write dot + REG_DELAY <= decide dot) is unchanged.  Measured:
+
+    DECIDE 335/336 -> "too late"/$02, 337 -> $80 (pass), 338 -> $03, 341 -> "too soon"
+
+With REG_DELAY=0 and ODD_DECIDE_DOT=337 the whole ppu_vbl_nmi set
+02/03/04/06/07/08/09/10 passes.
