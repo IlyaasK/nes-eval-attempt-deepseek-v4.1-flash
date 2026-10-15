@@ -80,7 +80,7 @@ for nm, ins in [("asl_zx", b"\x16"), ("lsr_zx", b"\x56"), ("rol_zx", b"\x36"), (
 # stack ops
 add("pha_pla", bytes([0xA9, 0x5A, 0x48]), bytes([0x68]))
 add("php_plp", bytes([0x38, 0x08]), bytes([0x28]))
-add("jsr_rts", b"", bytes([0x20, 0x00, 0x90]) + b"\x60")   # patched by caller
+add("jsr_rts", b"", bytes([0x20, 0x00, 0x90]))   # $9000 holds an RTS
 
 
 def build(battery, high, out, reps=8):
@@ -117,9 +117,9 @@ def build(battery, high, out, reps=8):
         emit(b"\xa5\x11")                # lda $11
         emit(b"\x69\x01")                # adc #1
         emit(b"\x85\x11")                # sta $11
-    emit(b"\xc6\x12")
-    emit(b"\xd0")                        # bne loop
-    emit(bytes([(loop - (len(code) + 1)) & 0xFF]))
+    emit(b"\xc6\x12")                    # dec $12
+    emit(b"\xf0\x03")                    # beq +3 (skip the jmp)
+    emit(b"\x4c" + struct.pack("<H", 0xC000 + loop))
     # write $10 (or $11) to palette[0]
     emit(b"\xa9\x3f\x8d\x06\x20\xa9\x00\x8d\x06\x20")
     emit(b"\xa5" + bytes([0x11 if high else 0x10]))

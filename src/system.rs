@@ -8,6 +8,9 @@ use crate::ppu::Ppu;
 pub const CPU_HZ: f64 = 1789772.7272727273;
 pub const SAMPLE_RATE: u32 = 44100;
 
+/// PPU dots clocked before the CPU's bus access inside its CPU cycle.
+const ACCESS_PHASE: u32 = 2;
+
 /// Whether DMA "get" (read) cycles fall on even CPU cycles. The reference fixes
 /// this at power-on; it only affects DMA alignment cycles.
 const GET_ON_EVEN: bool = true;
@@ -53,6 +56,10 @@ pub struct System {
     /// CPU cycles elapsed since power-on.
     pub cycles: u64,
     prev_nmi: bool,
+    /// NMI edge detected this cycle; promoted to `cpu.nmi_pending` at the start
+    /// of the next CPU cycle (hardware's edge detector output appears one cycle
+    /// after the edge is seen on the line).
+    nmi_latch: bool,
     oam_dma: Option<OamDma>,
 
     /// Pending access to repeat on DMA halt cycles.
@@ -81,6 +88,7 @@ impl System {
             strobe: false,
             cycles: 0,
             prev_nmi: false,
+            nmi_latch: false,
             oam_dma: None,
             halt_addr: 0,
             first_frame: true,
@@ -105,6 +113,7 @@ impl System {
         self.strobe = false;
         self.cycles = 0;
         self.prev_nmi = false;
+        self.nmi_latch = false;
         self.oam_dma = None;
         self.halt_addr = 0;
         self.first_frame = true;
@@ -133,11 +142,6 @@ impl System {
             }
             None => {}
         }
-        let line = self.ppu.nmi_line();
-        if line && !self.prev_nmi {
-            self.cpu.nmi_pending = true;
-        }
-        self.prev_nmi = line;
         self.ppu.advance();
         result
     }
@@ -146,9 +150,30 @@ impl System {
     #[inline]
     fn raw_cycle(&mut self, access: Option<Access>) -> u8 {
         let v = self.clock_dot(access);
+        // The NMI input is sampled during phi2 of each CPU cycle (here: at the
+        // bus access point); the edge detector's output is visible next cycle.
+        let line = self.ppu.nmi_line();
+        if line && !self.prev_nmi {
+            self.nmi_latch = true;
+            #[cfg(feature = "trace")]
+            {
+                if std::env::var("TRACE_NMI").is_ok() {
+                    eprintln!("NMI edge latched @{} (sl={},dot={})", self.cycles, self.ppu.scanline, self.ppu.dot);
+                }
+            }
+        }
+        #[cfg(feature = "trace")]
+        {
+            if std::env::var("TRACE_NMI").is_ok() && line != self.prev_nmi {
+                eprintln!("NMI line {} @{} (sl={},dot={}) status={:02X} ctrl={:02X}", if line {"HIGH"} else {"low"},
+                    self.cycles, self.ppu.scanline, self.ppu.dot, self.ppu.status, self.ppu.ctrl);
+            }
+        }
+        self.prev_nmi = line;
         self.apu.clock(self.cycles);
-        self.clock_dot(None);
-        self.clock_dot(None);
+        for _ in 0..(2 - ACCESS_PHASE) {
+            self.clock_dot(None);
+        }
         self.cycles += 1;
         self.audio_tick();
         v
@@ -156,6 +181,15 @@ impl System {
 
     #[inline]
     fn cpu_cycle(&mut self, access: Option<Access>) -> u8 {
+        if self.nmi_latch {
+            self.nmi_latch = false;
+            self.cpu.nmi_pending = true;
+        }
+        // Number of PPU dots clocked *before* the CPU's bus access within its
+        // CPU cycle (the CPU/PPU sub-cycle alignment).
+        for _ in 0..ACCESS_PHASE {
+            self.clock_dot(None);
+        }
         // A pending DMC DMA halts the CPU, but only on read cycles.
         let can_halt = match access {
             Some(a) if a.is_write() => false,
@@ -272,8 +306,12 @@ impl System {
     fn bus_write(&mut self, addr: u16, val: u8) {
         #[cfg(feature = "trace")]
         {
-            if (0x2000..=0x2007).contains(&addr) || addr == 0x4014 {
-                eprintln!("W {:04X} <- {:02X} @{}", addr, val, self.cycles);
+            if std::env::var("WRITE_TRACE").is_ok() && ((0x2000..=0x2007).contains(&addr) || addr == 0x4014) {
+                if addr == 0x2007 {
+                    eprintln!("W 2007 <- {:02X} @{} v={:04X} mask={:02X} sl={}", val, self.cycles, self.ppu.v, self.ppu.mask, self.ppu.scanline);
+                } else {
+                    eprintln!("W {:04X} <- {:02X} @{}", addr, val, self.cycles);
+                }
             }
         }
         match addr {
@@ -348,6 +386,10 @@ impl System {
                 if let Ok(w) = std::env::var("TRACE_WIN") {
                     let parts: Vec<u64> = w.split('-').map(|x| x.parse().unwrap()).collect();
                     if self.cycles >= parts[0] && self.cycles < parts[1] {
+                        if std::env::var("TRACE_DEC").is_ok() && (self.cpu.pc == 0xF29D || self.cpu.pc == 0xB9D0) {
+                            eprintln!("DEC entry @{} PC={:04X} A={:02X} X={:02X} Y={:02X} $9E={:02X} $9F={:02X} zp00={:02X} zp04={:02X}",
+                                self.cycles, self.cpu.pc, self.cpu.a, self.cpu.x, self.cpu.y, self.ram[0x9E], self.ram[0x9F], self.ram[0], self.ram[4]);
+                        }
                         if std::env::var("TRACE_SCAN").is_ok() && self.cpu.pc == 0x86ED {
                             let addr = ((self.ram[5] as u16) << 8 | self.ram[4] as u16).wrapping_add(self.cpu.y as u16);
                             eprintln!("scan end: ptr=${:04X} Y={:02X} addr=${:04X} rom={:02X} cnt={:02X}{:02X}",

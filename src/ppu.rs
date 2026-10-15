@@ -58,6 +58,7 @@ pub struct Ppu {
     pub scanline: u16,
     pub dot: u16,
     pub frame: u64,
+    pub total_dots: u64,
     pub odd_frame: bool,
     pub frame_complete: bool,
 
@@ -85,6 +86,9 @@ pub struct Ppu {
 
     /// Set when a $2002 read happened exactly one dot before the VBL set.
     vbl_suppress: bool,
+    /// Set when a $2002 read lands within a couple of PPU clocks of the VBL set:
+    /// the NMI is not generated for that frame.
+    nmi_suppress: bool,
     /// Last value written to $2007 (used for palette read back-bus bits).
     pub oam_addr_write_during_render: bool,
 }
@@ -109,6 +113,7 @@ impl Ppu {
             scanline: 0,
             dot: 0,
             frame: 0,
+            total_dots: 0,
             odd_frame: false,
             frame_complete: false,
             bg_latch_nt: 0,
@@ -128,6 +133,7 @@ impl Ppu {
             ev_mode: EvMode::CheckY,
             ev_y_in_range: false,
             vbl_suppress: false,
+            nmi_suppress: false,
             oam_addr_write_during_render: false,
         }
     }
@@ -162,6 +168,7 @@ impl Ppu {
         self.sprites = [SpriteUnit::default(); 8];
         self.ev_mode = EvMode::CheckY;
         self.vbl_suppress = false;
+        self.nmi_suppress = false;
         for p in self.fb.iter_mut() {
             *p = 0;
         }
@@ -177,7 +184,7 @@ impl Ppu {
 
     #[inline]
     pub fn nmi_line(&self) -> bool {
-        self.status & 0x80 != 0 && self.ctrl & 0x80 != 0
+        self.status & 0x80 != 0 && self.ctrl & 0x80 != 0 && !self.nmi_suppress
     }
 
     // ------------------------------------------------------------ memory ---
@@ -252,6 +259,16 @@ impl Ppu {
         match addr & 7 {
             2 => {
                 let mut result = (self.status & 0xE0) | (self.open_bus & 0x1F);
+                #[cfg(feature = "trace")]
+                {
+                    if std::env::var("TRACE_RD2002").is_ok() && (self.scanline == 240 || self.scanline == 241) {
+                        eprintln!("$2002 read sl={} dot={} status={:02X}", self.scanline, self.dot, self.status);
+                    }
+                }
+                // A read within a few PPU clocks before the VBL set kills the NMI
+                // for this frame (the line pulse is too short for the CPU's edge
+                // detector to see it).
+                if (self.scanline == 240 && self.dot >= 336) || (self.scanline == 241 && self.dot == 0) { self.nmi_suppress = true; }
                 if (self.scanline == 241 && self.dot == 0) {
                     // One PPU clock before the VBL set: this read suppresses the
                     // flag for this frame (and the NMI is not generated).
@@ -376,8 +393,10 @@ impl Ppu {
             }
             self.vbl_suppress = false;
         }
-        if sl == 261 && dot == 1 {
+        if sl == 261 && dot == 0 {
+            // Cleared exactly 6820 PPU clocks (20 scanlines) after the set.
             self.status &= !0xE0;
+            self.nmi_suppress = false;
         }
 
         let rendering = self.rendering_enabled();
@@ -776,6 +795,7 @@ impl Ppu {
     /// Advance to the next dot; handles scanline/frame boundaries.
     pub fn advance(&mut self) {
         self.dot += 1;
+        self.total_dots += 1;
         let line_len: u16 = 341;
         if self.dot >= line_len {
             self.dot = 0;

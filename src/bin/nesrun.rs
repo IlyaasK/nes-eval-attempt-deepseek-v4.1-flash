@@ -47,6 +47,9 @@ fn main() {
             "--ppustate" => {
                 i += 1;
             }
+            "--prgram" => {
+                i += 1;
+            }
             "--bench" => {
                 bench = true;
                 i += 1;
@@ -87,6 +90,19 @@ fn main() {
             }
         }
         sys.out.clear();
+        if std::env::args().any(|a| a == "--prgram") && f % 10 == 9 {
+            let prg = sys.mapper.prg_ram();
+            if prg.len() > 0x40 {
+                let mut txt = String::new();
+                for j in 4..0x400 {
+                    let c = prg[j];
+                    if c == 0 { break; }
+                    if (0x20..0x7F).contains(&c) { txt.push(c as char); }
+                    else if c == b'\n' { txt.push('|'); }
+                }
+                if txt.len() > 60 || prg[0] != 0 { eprintln!("frame {}: status=${:02X} sig={:02X}{:02X}{:02X} log={:?}", f, prg[0], prg[1], prg[2], prg[3], txt.replace('|', " | ").trim()); }
+            }
+        }
         if std::env::args().any(|a| a == "--ppustate") {
             let nt = sys.mapper.chr_read(0);
             let nz_vram = sys.ppu.vram.iter().filter(|&&b| b != 0).count();
@@ -97,8 +113,8 @@ fn main() {
             for j in 0..16 { s0.push_str(&format!("{:02X} ", sys.ppu.vram[j])); }
             let mut s1 = String::new();
             for j in 0..16 { s1.push_str(&format!("{:02X} ", sys.ppu.vram[1024+j])); }
-            eprintln!("frame {}: ctrl={:02X} mask={:02X} v={:04X} sl={} | NT0: {} | NT1: {} | chr0={:02X}",
-                f, sys.ppu.ctrl, sys.ppu.mask, sys.ppu.v, sys.ppu.scanline, s0, s1, nt);
+            eprintln!("frame {}: dots={} ctrl={:02X} mask={:02X} v={:04X} sl={} | NT0: {} | NT1: {} | chr0={:02X}",
+                f, sys.ppu.total_dots, sys.ppu.ctrl, sys.ppu.mask, sys.ppu.v, sys.ppu.scanline, s0, s1, nt);
             let mut oamstr = String::new();
             for j in 0..32 { oamstr.push_str(&format!("{:02X} ", sys.ppu.oam[j])); }
             eprintln!("    nonzero: vram={} chr={} oam={}", nz_vram, nz_chr, nz_oam);
