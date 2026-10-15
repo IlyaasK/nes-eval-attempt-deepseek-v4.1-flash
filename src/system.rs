@@ -254,6 +254,7 @@ impl System {
         }
         self.irq_prev_line = self.irq_line();
         self.irq_prev_i = !self.cpu.flag(crate::cpu::FLAG_I);
+
         self.apu.clock(self.cycles);
         for _ in 0..(2u32.saturating_sub(ACCESS_PHASE)) {
             self.clock_dot(None);

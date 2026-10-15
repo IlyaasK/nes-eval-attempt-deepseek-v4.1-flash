@@ -14,6 +14,24 @@
 use crate::ines::*;
 use crate::mapper::Mapper;
 
+/// Delay before a register write reaches the PPU (in dots).
+static mut REG_DELAY: u64 = 2;
+#[cfg(feature = "trace")]
+fn reg_delay() -> u64 {
+    unsafe {
+        if let Ok(v) = std::env::var("REG_DELAY") {
+            if let Ok(n) = v.parse::<u64>() {
+                REG_DELAY = n;
+            }
+        }
+        REG_DELAY
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn reg_delay() -> u64 {
+    unsafe { REG_DELAY }
+}
+
 /// How long the PPU's decay register keeps its value (about 600 ms).
 const DECAY_CYCLES: u32 = 600_000;
 
@@ -440,7 +458,21 @@ impl Ppu {
     pub fn read_register(&mut self, addr: u16, open_bus: u8, mapper: &mut dyn Mapper) -> u8 {
         match addr & 7 {
             2 => {
-                let mut result = (self.status & 0xE0) | (self.open_bus & 0x1F);
+                // The low bits come from the PPU's decay register, which sits on
+                // the palette data bus; with greyscale enabled that bus is
+                // masked to the two luminance bits.
+                let low = if self.mask & 0x01 != 0 {
+                    self.open_bus & 0x30
+                } else {
+                    self.open_bus & 0x1F
+                };
+                #[cfg(feature = "trace")]
+                {
+                    if std::env::var("TRACE_OB").is_ok() {
+                        eprintln!("$2002 read: mask={:02X} open={:02X} low={:02X}", self.mask, self.open_bus, low);
+                    }
+                }
+                let mut result = (self.status & 0xE0) | low;
                 #[cfg(feature = "trace")]
                 {
                     if std::env::var("TRACE_RD2002").is_ok() {
@@ -581,7 +613,7 @@ impl Ppu {
                 let n = self.reg_queue_n as usize;
                 let reg = (addr & 7) as u8;
                 if n < self.reg_queue.len() {
-                    self.reg_queue[n] = (self.total_dots + 2, reg, val);
+                    self.reg_queue[n] = (self.total_dots + reg_delay(), reg, val);
                     self.reg_queue_n += 1;
                 } else {
                     self.apply_reg(reg, val, mapper);
@@ -655,6 +687,7 @@ impl Ppu {
         self.flush_palette();
         self.flush_v_inc();
         self.flush_regs(mapper);
+        let _ = &mapper;
         if self.decay_timer > 0 {
             self.decay_timer -= 1;
             if self.decay_timer == 0 {
@@ -701,6 +734,12 @@ impl Ppu {
                         0 => {
                             let a = 0x2000 | (self.v & 0x0FFF);
                             self.bg_latch_nt = self.vram_read(a, mapper);
+                            #[cfg(feature = "trace")]
+                            {
+                                if std::env::var("TRACE_FETCH").is_ok() && self.scanline == 0 {
+                                    eprintln!("NT fetch sl=0 dot={} v={:04X} addr={:04X} nt={:02X} cx={}", dot, self.v, a, self.bg_latch_nt, self.v & 31);
+                                }
+                            }
                         }
                         2 => {
                             let a = 0x23C0
@@ -845,15 +884,6 @@ impl Ppu {
                 }
             } else {
                 // Rendering disabled: output the backdrop (or palette-RAM override).
-                #[cfg(feature = "trace")]
-                {
-                    if std::env::var("TRACE_ALLPX").is_ok() && dot == 1 && sl < 2 {
-                        eprintln!("procpx sl={} dot={}", sl, dot);
-                    }
-                    if std::env::var("TRACE_SL").is_ok() && dot == 1 && sl < 4 && self.frame == 3 {
-                        eprintln!("proc sl={} dot={} rendering={}", sl, dot, rendering);
-                    }
-                }
                 if sl <= 239 && (1..=256).contains(&dot) {
                     let x = (dot - 1) as usize;
                     let colour = self.backdrop_colour();
@@ -1020,6 +1050,14 @@ impl Ppu {
                         sp_pixel = pix;
                         sp_pal = self.sprites[i].attr & 3;
                         sp_prio = (self.sprites[i].attr >> 5) & 1;
+                        #[cfg(feature = "trace")]
+                        {
+                            if std::env::var("TRACE_SPRITE_EDGE").is_ok() && x >= 240 {
+                                eprintln!("sprite px sl={} x={} idx={} y={:02X} attr={:02X} tile={:02X} spx={:02X}",
+                                    self.scanline, x, i, self.sprites[i].y, self.sprites[i].attr,
+                                    0, self.sprites[i].x);
+                            }
+                        }
                     }
                 }
             }
@@ -1066,18 +1104,19 @@ impl Ppu {
             self.status |= 0x40;
         }
 
-        let mut addr = if is_sprite {
+        let addr = if is_sprite {
             0x3F10 | ((pal as u16) << 2) | pixel as u16
         } else if pixel == 0 {
             0x3F00
         } else {
             0x3F00 | ((pal as u16) << 2) | pixel as u16
         };
-        if self.mask & 0x01 != 0 {
-            addr &= 0x3F30;
-        }
         let idx = Self::pal_index(addr);
-        let colour = self.palette[idx] as u16 & 0x3F;
+        // Greyscale masks the colour that comes out of palette RAM.
+        let mut colour = self.palette[idx] as u16 & 0x3F;
+        if self.mask & 0x01 != 0 {
+            colour &= 0x30;
+        }
         let emph = ((self.mask >> 5) & 7) as u16;
         let sl = self.scanline as usize;
         self.fb[sl * 256 + x as usize] = (emph << 6) | colour;
@@ -1090,11 +1129,11 @@ impl Ppu {
             idx_addr = 0x3F00 | (self.v & 0x1F);
         }
         let idx = Self::pal_index(idx_addr);
-        let mut addr = idx as u16;
+        let mut colour = self.palette[idx] as u16 & 0x3F;
         if self.mask & 0x01 != 0 {
-            addr &= 0x30;
+            colour &= 0x30;
         }
-        self.palette[addr as usize] as u16 & 0x3F
+        colour
     }
 
     // -------------------------------------------------- sprite evaluation ---
