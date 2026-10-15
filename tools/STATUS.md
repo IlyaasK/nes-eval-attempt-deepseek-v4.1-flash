@@ -278,3 +278,44 @@ Audio at 600 frames: robotfindskitten 99.86% equal (rms 31), rhde 99.73%
 * The 2-pixel column at the start of row 0 on frames where the palette changes
   (frame boundary cuts inside scanline 0; FRAME_EXTRA=0 is the best of the
   tested offsets).
+
+# Session: instr_timing diagnosis + audio low-pass
+
+## Audio: output low-pass corner raised 14 kHz -> 40 kHz
+Measured against the reference with channel probes (using the A_LP/A_SCALE trace
+knobs, which are the actual names -- LP_HZ is not a knob):
+* pulse (50%% duty): corr 0.9784 at 14 kHz -> 0.9863 with the filter off;
+  low-frequency ratio 0.937 -> 0.971.
+* noise (period index 8): >3 kHz energy ratio 4.96 -> 1.73.
+* triangle: corr 0.9990 both ways.
+* games at 600 frames (sample-exact fraction / rms / corr):
+  file-fixers 0.5331/261.7/0.9671 -> 0.5338/260.0/0.9675
+  stallar     0.4051/214.7/0.9011 -> 0.4148/216.6/0.8999
+So the reference has essentially no output low-pass; default is now 40 kHz.
+
+## instr_timing: where it stands
+The ROM is MMC1 (not NROM as I first assumed -- file offset to CPU address
+mapping depends on the bank).  Its structure: a state machine whose handlers
+are copied to RAM ($0700-$07FF), a wall clock made of the pulse-1 length
+counter (set length=2, poll $4015 bit 0), and template handlers from $E32C
+that count iterations in $0A and dispatch through the threshold table at
+$E2EC (FA F1 E9 E2 DB D5 CE C9 C3 BE -> 10 states).
+
+In our emulator the CPU ends up spinning in the delay routines at
+$E440-$E462 forever (traced 30 frames: the only PCs executed are
+$E440-$E462), while the reference prints "All 2 tests passed" at frame 1301.
+Isolated check: a probe ROM containing an exact copy of $E440-$E46C runs the
+same delay in *exactly* the same number of frames (paint appears at frame 20
+in both), so instruction timing for that routine is right.  Patching the two
+delay constants ($D7, $CA) to $04 makes the ROM behave identically in both
+emulators for 500 frames, so the difference is in the test's own state
+selection, not in the delay itself.  Next: dump $0A/state at the point the
+reference finishes and compare with ours (the count is mod 256, so a few
+cycles of loop-cost difference flips the selected handler).
+
+## New tooling
+* `nesrun --dumpprg FILE` dumps the mapper-mapped $8000-$FFFF (bank aware).
+* `nesrun --dumpram FILE` dumps the 2 KiB of CPU RAM.
+* trace knobs TRACE_GAP (report cycle jumps > 8) and TRACE_DMA.
+* MMC1 verified against the reference with a two-bank probe (bank 0 = $2A at
+  $8000, bank 1 = $15 at $C000 read back identically).

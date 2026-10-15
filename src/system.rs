@@ -44,7 +44,7 @@ const AUDIO_START_DELAY: f64 = -(728.0 / (CPU_HZ / SAMPLE_RATE as f64));
 static mut AUDIO_SCALE: f64 = 32000.0;
 static mut HP1_HZ: f64 = 90.0;
 static mut HP2_HZ: f64 = 440.0;
-static mut LP_HZ: f64 = 14000.0;
+static mut LP_HZ: f64 = 40000.0;
 
 #[cfg(feature = "trace")]
 fn load_audio_env() {
@@ -226,6 +226,10 @@ pub struct System {
     first_frame: bool,
     pub hist_enabled: bool,
     pub pcwatch: u64,
+    #[cfg(feature = "trace")]
+    pub trace_prev_cycles: Option<u64>,
+    #[cfg(feature = "trace")]
+    pub trace_prev_pc: u16,
     pub hist: Vec<u16>,
 
     // Audio output
@@ -275,6 +279,10 @@ impl System {
             first_frame: true,
             hist_enabled: false,
             pcwatch: std::env::var("PCWATCH").ok().and_then(|v| v.parse().ok()).unwrap_or(0),
+            #[cfg(feature = "trace")]
+            trace_prev_cycles: None,
+            #[cfg(feature = "trace")]
+            trace_prev_pc: 0,
             hist: Vec::new(),
             out: Vec::with_capacity(8192),
             audio_acc: 0.0,
@@ -685,6 +693,17 @@ impl System {
     }
 
     pub fn step(&mut self) {
+        #[cfg(feature = "trace")]
+        if std::env::var("TRACE_GAP").is_ok() {
+            if let Some(prev) = self.trace_prev_cycles {
+                let delta = self.cycles - prev;
+                if delta > 8 {
+                    eprintln!("gap {} cycles: prev_pc={:04X} pc={:04X} cyc={}", delta, self.trace_prev_pc, self.cpu.pc, self.cycles);
+                }
+            }
+            self.trace_prev_cycles = Some(self.cycles);
+            self.trace_prev_pc = self.cpu.pc;
+        }
         self.sample_hist();
         #[cfg(feature = "trace")]
         {
