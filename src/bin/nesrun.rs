@@ -22,6 +22,8 @@ fn main() {
     let mut bench = false;
     let mut a12 = false;
     let mut dumpvram: Option<String> = None;
+    let mut dumpram: Option<String> = None;
+    let mut dumpprg: Option<String> = None;
     let mut oam = false;
     let mut hot = false;
     let mut replay: Option<String> = None;
@@ -89,6 +91,14 @@ fn main() {
             "--hot" => {
                 hot = true;
                 i += 1;
+            }
+            "--dumpprg" => {
+                dumpprg = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "--dumpram" => {
+                dumpram = Some(args[i + 1].clone());
+                i += 2;
             }
             "--dumpvram" => {
                 dumpvram = Some(args[i + 1].clone());
@@ -227,6 +237,16 @@ fn main() {
             eprintln!("frame {}: cycles={} pc={:04X} ppu ctrl={:02X} mask={:02X} v={:04X} t={:04X} sl={} dot={}",
                 f, sys.cycles, sys.cpu.pc, sys.ppu.ctrl, sys.ppu.mask, sys.ppu.v, sys.ppu.t, sys.ppu.scanline, sys.ppu.dot);
         }
+    }
+    if let Some(path) = &dumpprg {
+        let mut prg = Vec::with_capacity(0x8000);
+        for a in 0x8000u16..=0xFFFF {
+            prg.push(sys.mapper.prg_read(a));
+        }
+        std::fs::write(path, &prg).ok();
+    }
+    if let Some(path) = &dumpram {
+        std::fs::write(path, &sys.ram[..]).ok();
     }
     if let Some(dir) = &dumpvram {
         std::fs::create_dir_all(dir).ok();

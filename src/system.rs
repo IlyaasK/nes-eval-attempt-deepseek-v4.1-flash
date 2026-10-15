@@ -471,6 +471,10 @@ impl System {
 
     /// Steal cycles for a DMC sample fetch: halt, dummy, [align], get.
     fn dmc_dma_run(&mut self, addr: u16) {
+        #[cfg(feature = "trace")]
+        if std::env::var("TRACE_DMA").is_ok() {
+            eprintln!("dma cyc={} pc={:04X}", self.cycles, self.cpu.pc);
+        }
         let load = self.apu.dmc_dma_is_load();
         // Halt cycle: the CPU repeats its attempted read.
         self.raw_cycle(Some(Access::Read(addr)));
