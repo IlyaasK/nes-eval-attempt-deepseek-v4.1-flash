@@ -76,25 +76,6 @@ fn lp_coef(hz: f64) -> f64 {
     dt / (rc + dt)
 }
 
-/// PPU dots to run past the pre-render/scanline-0 boundary before returning
-/// from `emu_run_frame`.
-static mut FRAME_EXTRA_DOTS: usize = 0;
-#[cfg(feature = "trace")]
-fn frame_extra_dots() -> usize {
-    unsafe {
-        if let Ok(v) = std::env::var("FRAME_EXTRA") {
-            if let Ok(n) = v.parse::<usize>() {
-                FRAME_EXTRA_DOTS = n;
-            }
-        }
-        FRAME_EXTRA_DOTS
-    }
-}
-#[cfg(not(feature = "trace"))]
-fn frame_extra_dots() -> usize {
-    unsafe { FRAME_EXTRA_DOTS }
-}
-
 /// How many consecutive samples the NMI line must be high before the CPU's
 /// edge detector latches an interrupt.
 static mut NMI_LATCH_DOTS: u32 = 1;
@@ -364,13 +345,13 @@ impl System {
         if phase == ACCESS_PHASE {
             self.sample_nmi();
         }
-        // The IRQ input is level-sensitive.  The CPU polls it during the
-        // cycle before an instruction's last cycle, so the state latched here
-        // is one cycle old when the instruction ends; that reproduces the
-        // one-instruction delay of CLI without delaying PLP/RTI.
-        if self.irq_prev_line && self.irq_prev_i {
-            self.cpu.irq_seen = true;
-        }
+        // The IRQ input is level-sensitive.  The CPU polls it on the cycle
+        // before an instruction's last cycle, so the value consulted at the
+        // instruction boundary is the one-cycle-old level sample: a CLI's I
+        // write (last cycle) is not seen by its own poll, while an RTI's
+        // flag pull (earlier cycle) is.  This must not be sticky, or a sample
+        // taken during CLI's instruction would leak into the next one.
+        self.cpu.irq_seen = self.irq_prev_line && self.irq_prev_i;
         self.irq_prev_line = self.irq_line();
         self.irq_prev_i = !self.cpu.flag(crate::cpu::FLAG_I);
 
@@ -675,12 +656,6 @@ impl System {
             if guard > 40_000_000 {
                 break;
             }
-        }
-        // The reference's frame ends a few PPU dots into scanline 0 rather
-        // than exactly at the pre-render/scanline-0 boundary, so the first few
-        // pixels of row 0 in a dumped frame already belong to the new frame.
-        for _ in 0..frame_extra_dots() {
-            self.step();
         }
     }
 

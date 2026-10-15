@@ -136,3 +136,55 @@ palette-transition frames with a 2-pixel column at the frame boundary.
 Game audio: robotfindskitten is sample-exact apart from the power-on
 transient; rhde differs by rms ~30; file-fixers/stallar match note-for-note
 in loudness but differ in waveform phase and in a few note choices.
+
+## Odd-frame skip (fixed)
+The skip's *decision* uses the rendering-enabled state sampled at
+`ODD_DECIDE_DOT` (default 338 = the dot before the last), while the skipped
+clock remains dot 340 (`ODD_SKIP_DOT`).  With that split both
+`ppu_vbl_nmi__09-even_odd_frames` and `__10-even_odd_timing` pass; using a
+single dot for both made 09 fail ("pattern 00 02") and 10 report "skipped too
+late".
+
+## Test ROM frame diffs
+`sprite_hit_tests__02.alignment` passes on screen but 3 of 400 frames differ by
+652 pixels in total; `sprite_hit_tests__03.corners` is 399/400 exact with a
+2-pixel difference.  `branch_timing_tests__1` and `sprite_overflow_tests__*`
+did not report a status line through the SRAM signature check but complete
+normally.
+
+## IRQ poll is a per-cycle sample, not a latch (fixed)
+`System::raw_cycle` used to *latch* `cpu.irq_seen` once `irq_prev_line && irq_prev_i`
+had been true, so a sample taken during `CLI` leaked into a later instruction.
+Probe (/tmp/irqprobe.py) against the reference:
+
+| sequence            | ref | before |
+|---------------------|-----|--------|
+| cli;sei             |  1  |   1 OK |
+| cli;nop;nop         |  0  |   0 OK |
+| cli only            |  1  |   1 OK |
+| cli;plp             |  0  |   0 OK |
+| **cli;rti**         |  0  |   1 BAD |
+| sei;cli             |  1  |   1 OK |
+
+The poll must be the one-cycle-old level sample evaluated at each instruction
+boundary: an RTI's flag pull (which happens several cycles before its end) is
+then visible to its own poll, while a CLI's last-cycle I write is not.
+Assigning `cpu.irq_seen = irq_prev_line && irq_prev_i` every cycle (instead of
+`if ... { = true }`) matches all six cases, and `cpu_interrupts_v2__1-cli_latency`
+now passes (status $80).
+
+## Session status (round 2)
+Passing now: `ppu_open_bus`, `ppu_vbl_nmi__02/03/04/06/09/10`,
+`cpu_interrupts_v2__1-cli_latency`, all apu_test ROMs, `mmc3_test_2__2-details`,
+`cpu_reset__registers`; `branch_timing_tests__1` is 399/400 frame-exact.
+
+Both sprite tests share one visual difference outside the frame boundary:
+sprite_hit_tests__02 frames 29-30 and sprite_overflow_tests__2 frames 22-24
+differ in rows 32-38 and 48-54 (text-height bands, cols 16-198), where the
+reference draws colour $0F and we draw colour $30.  Their verdicts still match.
+That points at the sprite palette selection or the sprite patterns used by the
+tests' result displays, not at the hit/overflow flags themselves.
+
+Still failing: cpu_interrupts_v2__3 (NMI/BRK interaction table: first row $23
+vs our $21, tail rows $25/$25 vs $24/$24), mmc3_test_2__4 (A12/IRQ alignment),
+ppu_vbl_nmi__07/08 (sub-dot NMI edge recognition).
