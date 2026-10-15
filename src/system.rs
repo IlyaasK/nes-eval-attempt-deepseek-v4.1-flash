@@ -57,6 +57,25 @@ fn lp_coef(hz: f64) -> f64 {
     dt / (rc + dt)
 }
 
+/// How many consecutive PPU dots the NMI line must be high before the CPU's
+/// edge detector latches an interrupt.
+static mut NMI_LATCH_DOTS: u32 = 2;
+#[cfg(feature = "trace")]
+fn nmi_latch_dots() -> u32 {
+    unsafe {
+        if let Ok(v) = std::env::var("NMI_LATCH_DOTS") {
+            if let Ok(n) = v.parse::<u32>() {
+                NMI_LATCH_DOTS = n;
+            }
+        }
+        NMI_LATCH_DOTS
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn nmi_latch_dots() -> u32 {
+    unsafe { NMI_LATCH_DOTS }
+}
+
 /// PPU dots clocked before the CPU's bus access inside its CPU cycle.
 const ACCESS_PHASE: u32 = 2;
 
@@ -106,6 +125,9 @@ pub struct System {
     /// IRQ line and I-flag state as sampled at the end of the previous cycle.
     irq_prev_line: bool,
     irq_prev_i: bool,
+    /// Consecutive PPU dots the NMI line has been high (the CPU's edge
+    /// detector needs the line up for a few dots before it latches).
+    nmi_high_dots: u32,
     oam_dma: Option<OamDma>,
 
     /// Pending access to repeat on DMA halt cycles.
@@ -149,6 +171,7 @@ impl System {
             nmi_latch: false,
             irq_prev_line: false,
             irq_prev_i: false,
+            nmi_high_dots: 0,
             oam_dma: None,
             halt_addr: 0,
             first_frame: true,
@@ -188,6 +211,7 @@ impl System {
         self.nmi_latch = false;
         self.irq_prev_line = false;
         self.irq_prev_i = false;
+        self.nmi_high_dots = 0;
         self.oam_dma = None;
         self.halt_addr = 0;
         self.first_frame = true;
@@ -232,8 +256,13 @@ impl System {
         // an edge that has already been asserted.
         {
             let line = self.ppu.nmi_line();
-            if line && !self.prev_nmi {
-                self.nmi_latch = true;
+            if line {
+                self.nmi_high_dots = self.nmi_high_dots.saturating_add(1);
+                if self.nmi_high_dots == nmi_latch_dots() {
+                    self.nmi_latch = true;
+                }
+            } else {
+                self.nmi_high_dots = 0;
             }
             self.prev_nmi = line;
         }
