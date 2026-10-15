@@ -188,3 +188,26 @@ tests' result displays, not at the hit/overflow flags themselves.
 Still failing: cpu_interrupts_v2__3 (NMI/BRK interaction table: first row $23
 vs our $21, tail rows $25/$25 vs $24/$24), mmc3_test_2__4 (A12/IRQ alignment),
 ppu_vbl_nmi__07/08 (sub-dot NMI edge recognition).
+
+## $2005 second write bug (fixed, big)
+`apply_reg`'s $2005 else-branch wrote the Y scroll into the coarse-X/fine-X bits
+instead of coarse Y (bits 5-9) and fine Y (bits 12-14).  Effect: any ROM that
+sets its scroll with $2005 (X then Y) rendered the wrong nametable region.  The
+interrupt tests' screens were blank; they now draw.  Fix:
+
+    self.t = (self.t & 0x0C1F) | (((val & 7) << 12) | ((val & 0xF8) << 2));
+
+## Probes built this session (in /tmp, reusable)
+* `irqprobe.py` - CLI/RTI/PLP/SEI IRQ latency; all six sequences match.
+* `pushp.py` - pushed status for NMI in various flag states; matches ($24/$25).
+* `straddle.py`, `straddle2.py`, `nmiwin*.py`, `supp*.py` - NMI enable/disable
+  windows around the vblank flag; my emulator matches the reference on all of
+  them, so the vbl_nmi 07/08 difference is inside the test's own entry timing.
+* `noiseprobe.py`, `chanprobe.py` - per-channel level/spectrum comparison:
+  triangle 0.98x, pulse 0.94x, noise 1.37x louder with an uncorrelated
+  waveform (3 kHz+ energy ~5x).  Noise period/timer semantics look correct per
+  the period table, so the reference's noise differs in some other way.
+* `mmc3a12.py` - MMC3 A12 probe (needs a sprite in range; interest is in the
+  IRQ timing per $2000 pattern-table setting).
+* tools/readtext.py - decode a test ROM's text screen using the ROM's own font
+  (auto-detects fine scroll); works on ROMs with CHR-ROM fonts.

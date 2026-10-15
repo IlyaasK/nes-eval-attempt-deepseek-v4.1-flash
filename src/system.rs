@@ -95,6 +95,21 @@ fn nmi_latch_dots() -> u32 {
     unsafe { NMI_LATCH_DOTS }
 }
 
+static mut NMI_LEVEL_POLL: bool = false;
+#[cfg(feature = "trace")]
+fn nmi_level_poll() -> bool {
+    unsafe {
+        if let Ok(v) = std::env::var("NMI_LEVEL_POLL") {
+            NMI_LEVEL_POLL = v != "0";
+        }
+        NMI_LEVEL_POLL
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn nmi_level_poll() -> bool {
+    unsafe { NMI_LEVEL_POLL }
+}
+
 /// PPU dots to keep running after the frame boundary before returning.
 static mut FRAME_EXTRA_DOTS: usize = 0;
 #[cfg(feature = "trace")]
@@ -177,6 +192,8 @@ pub struct System {
     /// of the next CPU cycle (hardware's edge detector output appears one cycle
     /// after the edge is seen on the line).
     nmi_latch: bool,
+    /// Level-polled NMI: set while the NMI line has already been serviced.
+    nmi_serviced: bool,
     /// IRQ line and I-flag state as sampled at the end of the previous cycle.
     irq_prev_line: bool,
     irq_prev_i: bool,
@@ -232,6 +249,7 @@ impl System {
             cycles: 0,
             prev_nmi: false,
             nmi_latch: false,
+            nmi_serviced: false,
             irq_prev_line: false,
             irq_prev_i: false,
             nmi_high_dots: 0,
@@ -279,6 +297,7 @@ impl System {
         self.cycles = 0;
         self.prev_nmi = false;
         self.nmi_latch = false;
+        self.nmi_serviced = false;
         self.irq_prev_line = false;
         self.irq_prev_i = false;
         self.nmi_high_dots = 0;
@@ -344,6 +363,20 @@ impl System {
     #[inline]
     fn sample_nmi(&mut self) {
         let line = self.ppu.nmi_line();
+        if nmi_level_poll() {
+            // Level-polled model: the NMI is requested once per high period,
+            // decided at the instruction boundary (like the IRQ input).
+            if line {
+                if !self.nmi_serviced {
+                    self.cpu.nmi_pending = true;
+                }
+                self.nmi_serviced = true;
+            } else {
+                self.nmi_serviced = false;
+            }
+            self.prev_nmi = line;
+            return;
+        }
         if line {
             self.nmi_high_dots = self.nmi_high_dots.saturating_add(1);
             if self.nmi_high_dots == nmi_latch_dots() {
@@ -389,6 +422,7 @@ impl System {
     fn cpu_cycle(&mut self, access: Option<Access>) -> u8 {
         if self.nmi_latch {
             self.nmi_latch = false;
+        self.nmi_serviced = false;
             self.cpu.nmi_pending = true;
         }
         // Number of PPU dots clocked *before* the CPU's bus access within its

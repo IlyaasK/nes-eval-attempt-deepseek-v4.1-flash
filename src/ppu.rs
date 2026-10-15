@@ -20,7 +20,7 @@ fn trace_scanline() -> u16 {
 }
 
 /// Delay before a register write reaches the PPU (in dots).
-static mut REG_DELAY: u64 = 2;
+static mut REG_DELAY: u64 = 0;
 #[cfg(feature = "trace")]
 fn reg_delay() -> u64 {
     unsafe {
