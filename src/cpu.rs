@@ -246,7 +246,7 @@ impl System {
         let a = self.cpu.a;
         let carry = self.cpu.flag(FLAG_C) as u16;
         if !self.cpu.flag(FLAG_D) {
-            let diff = a as u16).wrapping_sub(v as u16).wrapping_sub(1 - carry);
+            let diff = (a as u16).wrapping_sub(v as u16).wrapping_sub(1 - carry);
             let r = diff as u8;
             self.cpu.set_flag(FLAG_C, diff < 0x100);
             let overflow = ((a ^ v) & (a ^ r) & 0x80) != 0;
@@ -437,7 +437,7 @@ impl System {
         self.cpu.irq_seen = false;
     }
 
-    fn reset_sequence(&mut self) {
+    pub(crate) fn reset_sequence(&mut self) {
         // 7 cycles: two dummy reads, three suppressed pushes, two vector reads.
         self.idle_read(self.cpu.pc);
         self.idle_read(self.cpu.pc);
@@ -1607,10 +1607,6 @@ impl System {
             // ---- JAM / KIL
             0x02 | 0x12 | 0x22 | 0x32 | 0x42 | 0x52 | 0x62 | 0x72 | 0x92 | 0xB2 | 0xD2 | 0xF2 => {
                 self.cpu.jammed = true;
-            }
-            _ => {
-                // Any remaining opcode is undefined; treat as a 2-cycle NOP.
-                let _ = self.am_imm();
             }
         }
     }

@@ -12,3 +12,6 @@ crate-type = ["cdylib", "rlib"]
 opt-level = 3
 panic = "abort"
 codegen-units = 1
+
+[features]
+trace = []

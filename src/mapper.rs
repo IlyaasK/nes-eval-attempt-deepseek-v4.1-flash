@@ -699,3 +699,24 @@ pub fn make_mapper(cart: &Cart) -> Option<Box<dyn Mapper>> {
         _ => return None,
     })
 }
+
+// ------------------------------------------------------------- null map ---
+
+pub struct Null;
+
+impl Mapper for Null {
+    fn prg_read(&mut self, _addr: u16) -> u8 {
+        0
+    }
+    fn prg_write(&mut self, _addr: u16, _val: u8) {}
+    fn chr_read(&mut self, _addr: u16) -> u8 {
+        0
+    }
+    fn chr_write(&mut self, _addr: u16, _val: u8) {}
+    fn mirroring(&self) -> u8 {
+        MIRROR_HORIZONTAL
+    }
+    fn prg_ram(&self) -> &[u8] {
+        &[]
+    }
+}
