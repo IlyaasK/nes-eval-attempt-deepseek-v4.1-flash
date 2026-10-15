@@ -543,6 +543,21 @@ fn noise_period_plus() -> u16 {
     unsafe { NOISE_PERIOD_PLUS }
 }
 
+static mut DMC_DMA_DISABLED: bool = false;
+#[cfg(feature = "trace")]
+fn dmc_dma_disabled() -> bool {
+    unsafe {
+        if let Ok(v) = std::env::var("DMC_DMA_OFF") {
+            DMC_DMA_DISABLED = v != "0";
+        }
+        DMC_DMA_DISABLED
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn dmc_dma_disabled() -> bool {
+    unsafe { DMC_DMA_DISABLED }
+}
+
 /// Mixer weight of the noise channel (the classic TND formula uses 2).
 static mut NOISE_WEIGHT: usize = 1;
 #[cfg(feature = "trace")]
@@ -906,6 +921,9 @@ impl Apu {
     }
 
     pub fn dmc_dma_request(&self) -> bool {
+        if dmc_dma_disabled() {
+            return false;
+        }
         self.dmc.sample_buffer.is_none() && self.dmc.bytes_remaining > 0
     }
 

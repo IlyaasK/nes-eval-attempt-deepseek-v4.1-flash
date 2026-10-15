@@ -691,7 +691,7 @@ impl System {
                         #[cfg(feature = "trace")]
                         if std::env::var("TRACE_ALL").is_ok() {
                             eprintln!("PC {:04X} @{} A={:02X} X={:02X} Y={:02X} P={:02X} S={:02X}",
-                                self.cpu.pc, self.cycles, self.cpu.a, self.cpu.x, self.cpu.y, self.cpu.p, self.cpu.s);
+                                self.cpu.pc, self.cycles, self.cpu.a, self.cpu.x, self.cpu.y, self.cpu.p, self.cpu.sp);
                         }
                         if std::env::var("TRACE_DEC").is_ok() && (self.cpu.pc == 0xF29D || self.cpu.pc == 0xB9D0) {
                             eprintln!("DEC entry @{} PC={:04X} A={:02X} X={:02X} Y={:02X} $9E={:02X} $9F={:02X} zp00={:02X} zp04={:02X}",
