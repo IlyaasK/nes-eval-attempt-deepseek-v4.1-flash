@@ -17,10 +17,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pairshot import load  # noqa: E402
 
 
-def font_tiles(rom_path, base):
-    data = open(rom_path, "rb").read()
-    chr_off = 16 + 16384 * (data[4] & 0x0F)
-    chr_ = data[chr_off:chr_off + 8192]
+def font_tiles(rom_path, base, chr_file=None):
+    if chr_file:
+        chr_ = open(chr_file, "rb").read()[:8192]
+    else:
+        data = open(rom_path, "rb").read()
+        chr_off = 16 + 16384 * (data[4] & 0x0F)
+        chr_ = data[chr_off:chr_off + 8192]
     tiles = []
     for t in range(256):
         o = base + t * 16
@@ -45,10 +48,11 @@ def main():
     ap.add_argument("--font-base", default="0000")
     ap.add_argument("--bg", default=None, help="backdrop pixel value (default: most common)")
     ap.add_argument("--rows", default="0:30")
+    ap.add_argument("--chr", default=None, help="raw 8 KiB CHR image (for CHR-RAM ROMs)")
     args = ap.parse_args()
 
     base = int(args.font_base, 16)
-    tiles = font_tiles(args.rom, base)
+    tiles = font_tiles(args.rom, base, args.chr)
     if not any(m is not None and m.any() for m in tiles):
         print("(CHR has no font data at %04X - ROM probably uses CHR-RAM)" % base)
         return

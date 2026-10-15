@@ -391,7 +391,7 @@ struct Noise {
 
 impl Noise {
     fn period(&self) -> u16 {
-        NOISE_PERIOD_APU[(self.period_index & 0x0F) as usize]
+        NOISE_PERIOD_APU[(self.period_index & 0x0F) as usize] + noise_period_plus()
     }
 
     fn clock_timer(&mut self) {
@@ -525,8 +525,26 @@ struct FrameCounter {
 // APU
 // ---------------------------------------------------------------------------
 
+/// Extra APU cycles added to the noise timer period.
+static mut NOISE_PERIOD_PLUS: u16 = 0;
+#[cfg(feature = "trace")]
+fn noise_period_plus() -> u16 {
+    unsafe {
+        if let Ok(v) = std::env::var("NOISE_PERIOD_PLUS") {
+            if let Ok(n) = v.parse::<u16>() {
+                NOISE_PERIOD_PLUS = n;
+            }
+        }
+        NOISE_PERIOD_PLUS
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn noise_period_plus() -> u16 {
+    unsafe { NOISE_PERIOD_PLUS }
+}
+
 /// Mixer weight of the noise channel (the classic TND formula uses 2).
-static mut NOISE_WEIGHT: usize = 2;
+static mut NOISE_WEIGHT: usize = 1;
 #[cfg(feature = "trace")]
 fn noise_weight() -> usize {
     unsafe {

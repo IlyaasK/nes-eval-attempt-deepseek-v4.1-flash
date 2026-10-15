@@ -110,6 +110,23 @@ fn nmi_level_poll() -> bool {
     unsafe { NMI_LEVEL_POLL }
 }
 
+/// Whether the first emu_run_frame call returns without emulating (the
+/// reference behaves this way).
+static mut FIRST_FRAME_SKIPS: bool = true;
+#[cfg(feature = "trace")]
+fn first_frame_skips() -> bool {
+    unsafe {
+        if let Ok(v) = std::env::var("FIRST_FRAME_SKIP") {
+            FIRST_FRAME_SKIPS = v != "0";
+        }
+        FIRST_FRAME_SKIPS
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn first_frame_skips() -> bool {
+    unsafe { FIRST_FRAME_SKIPS }
+}
+
 /// PPU dots to keep running after the frame boundary before returning.
 static mut FRAME_EXTRA_DOTS: usize = 0;
 #[cfg(feature = "trace")]
@@ -700,7 +717,9 @@ impl System {
     pub fn run_frame(&mut self) {
         if self.first_frame {
             self.first_frame = false;
-            return;
+            if first_frame_skips() {
+                return;
+            }
         }
         self.ppu.frame_complete = false;
         let mut guard: u64 = 0;
