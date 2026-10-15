@@ -20,6 +20,8 @@ fn main() {
     let mut from: u64 = 0;
     let mut bench = false;
     let mut a12 = false;
+    let mut dumpvram: Option<String> = None;
+    let mut oam = false;
     let mut i = 3;
     while i < args.len() {
         match args[i].as_str() {
@@ -67,6 +69,14 @@ fn main() {
             "--a12" => {
                 a12 = true;
                 i += 1;
+            }
+            "--oam" => {
+                oam = true;
+                i += 1;
+            }
+            "--dumpvram" => {
+                dumpvram = Some(args[i + 1].clone());
+                i += 2;
             }
             other => {
                 eprintln!("unknown arg {}", other);
@@ -157,6 +167,10 @@ fn main() {
                 f, sys.ppu.palette[0], sys.ppu.palette[1], sys.ppu.palette[2], sys.ppu.palette[3],
                 sys.ppu.v, sys.ppu.mask, sys.ppu.fb[0]);
         }
+        if oam && f >= 4 {
+            let y: Vec<String> = (0..64).map(|i| format!("{:02X}", sys.ppu.oam[i * 4])).collect();
+            eprintln!("frame {} OAM Y: {}", f, y.join(" "));
+        }
         #[cfg(feature = "trace")]
         if a12 {
             if let Some(m) = sys.mapper.as_any().and_then(|a| a.downcast_ref::<nes_emu::mapper::Mmc3>()) {
@@ -169,6 +183,16 @@ fn main() {
             eprintln!("frame {}: cycles={} pc={:04X} ppu ctrl={:02X} mask={:02X} v={:04X} t={:04X} sl={} dot={}",
                 f, sys.cycles, sys.cpu.pc, sys.ppu.ctrl, sys.ppu.mask, sys.ppu.v, sys.ppu.t, sys.ppu.scanline, sys.ppu.dot);
         }
+    }
+    if let Some(dir) = &dumpvram {
+        std::fs::create_dir_all(dir).ok();
+        let mut chr: Vec<u8> = Vec::with_capacity(0x2000);
+        for a in 0..0x2000usize {
+            chr.push(sys.mapper.chr_read(a as u16));
+        }
+        std::fs::write(format!("{}/chr.bin", dir), &chr).ok();
+        std::fs::write(format!("{}/vram.bin", dir), &sys.ppu.vram[..]).ok();
+        std::fs::write(format!("{}/pal.bin", dir), &sys.ppu.palette[..]).ok();
     }
     let elapsed = start.elapsed();
     if bench {

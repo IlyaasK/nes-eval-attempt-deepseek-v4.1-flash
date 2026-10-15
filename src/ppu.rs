@@ -14,6 +14,23 @@
 use crate::ines::*;
 use crate::mapper::Mapper;
 
+/// Which PPU dot a $2002 read suppresses the vblank set on:
+/// bit 0 = the dot before the set (240,340), bit 1 = the set dot (241,0).
+static mut VBL_SUPPRESS_MODE: u32 = 1;
+fn vbl_suppress_mode() -> u32 {
+    unsafe {
+        #[cfg(feature = "trace")]
+        {
+            if let Ok(v) = std::env::var("VBL_SUPPRESS") {
+                if let Ok(n) = v.parse::<u32>() {
+                    VBL_SUPPRESS_MODE = n;
+                }
+            }
+        }
+        VBL_SUPPRESS_MODE
+    }
+}
+
 #[derive(Clone, Copy, Default)]
 pub struct SpriteUnit {
     pub x: u8,
@@ -23,7 +40,7 @@ pub struct SpriteUnit {
     pub hi: u8,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 enum EvMode {
     /// Evaluating OAM[n][0] as a Y coordinate.
     CheckY,
@@ -265,14 +282,19 @@ impl Ppu {
                 let mut result = (self.status & 0xE0) | (self.open_bus & 0x1F);
                 #[cfg(feature = "trace")]
                 {
-                    if std::env::var("TRACE_RD2002").is_ok() && (self.scanline == 240 || self.scanline == 241) {
+                    if std::env::var("TRACE_RD2002").is_ok() {
                         eprintln!("$2002 read sl={} dot={} status={:02X}", self.scanline, self.dot, self.status);
                     }
                 }
                 // A read exactly one PPU clock before the VBL set suppresses the
                 // flag for the whole frame (and the NMI is not generated).
-                if self.scanline == 240 && self.dot == 340 {
+                if self.scanline == 240 && self.dot == 340 && vbl_suppress_mode() & 1 != 0 {
                     self.vbl_suppress = true;
+                    self.nmi_suppress = true;
+                    result &= 0x7F;
+                }
+                if self.scanline == 241 && self.dot == 0 && vbl_suppress_mode() & 2 != 0 {
+                    self.status &= !0x80;
                     self.nmi_suppress = true;
                     result &= 0x7F;
                 }
@@ -524,6 +546,9 @@ impl Ppu {
                 if sl <= 239 && dot == 0 {
                     // secondary OAM clear happens on dots 0..=63 two bytes per dot
                     self.sprite_count = 0;
+                    self.ev_n = 0;
+                    self.ev_m = 0;
+                    self.ev_mode = EvMode::CheckY;
                 }
                 if sl <= 239 && (0..=63).contains(&dot) && dot & 1 == 1 {
                     let base = ((dot - 1) as usize) & 0x1F;
@@ -773,6 +798,12 @@ impl Ppu {
     }
 
     fn evaluate_sprite_step(&mut self) {
+        #[cfg(feature = "trace")]
+        {
+            if std::env::var("TRACE_EV").is_ok() {
+                eprintln!("ev sl={} dot={} n={} m={} cnt={} mode={:?}", self.scanline, self.dot, self.ev_n, self.ev_m, self.sprite_count, self.ev_mode);
+            }
+        }
         match self.ev_mode {
             EvMode::CheckY => {
                 let y = self.oam[(self.ev_n as usize) * 4];
@@ -816,6 +847,12 @@ impl Ppu {
                 let addr = (self.ev_n as usize * 4 + self.ev_m as usize) & 0xFF;
                 let v = self.oam[addr];
                 if self.ev_in_range(v) {
+                    #[cfg(feature = "trace")]
+                    {
+                        if std::env::var("TRACE_OVF").is_ok() {
+                            eprintln!("overflow set sl={} n={} m={} addr={:02X} v={:02X}", self.scanline, self.ev_n, self.ev_m, addr, v);
+                        }
+                    }
                     self.status |= 0x20;
                     let m = self.ev_m as usize + 3;
                     self.ev_n = self.ev_n.wrapping_add((m / 4) as u8);
@@ -834,6 +871,19 @@ impl Ppu {
 
     /// Advance to the next dot; handles scanline/frame boundaries.
     pub fn advance(&mut self) {
+        #[cfg(feature = "trace")]
+        {
+            if std::env::var("SL_TRACE").is_ok()
+                && self.dot == 0
+                && matches!(self.scanline, 0 | 1 | 2 | 30 | 31 | 32 | 33 | 199 | 200 | 239 | 240 | 241 | 261 | 262)
+            {
+                eprintln!(
+                    "sl={} f={} ctrl={:02X} mask={:02X} v={:04X} t={:04X} fx={} vbl={}",
+                    self.scanline, self.frame, self.ctrl, self.mask, self.v, self.t, self.fine_x,
+                    (self.status >> 7) & 1
+                );
+            }
+        }
         #[cfg(feature = "trace")]
         if self.scanline == 0 && self.dot == 0 {
             self.dbg_sprite_px = 0;
