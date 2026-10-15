@@ -8,6 +8,17 @@ use crate::ppu::Ppu;
 pub const CPU_HZ: f64 = 1789772.7272727273;
 pub const SAMPLE_RATE: u32 = 44100;
 
+/// Windowed-sinc low-pass (35 taps, 13 kHz, Blackman) applied to the output,
+/// matching the reference's band-limited resampling (17-sample group delay).
+const FIR_TAPS: usize = 35;
+const FIR_COEFFS: [f64; FIR_TAPS] = [
+    -0.0000000000, -0.0000582377, 0.0000971652, 0.0003321966, -0.0013859498, 0.0020410250, -0.0002454556,
+    -0.0049364911, 0.0103932113, -0.0088657946, -0.0054848168, 0.0282752741, -0.0409680922, 0.0191226842,
+    0.0492957274, -0.1486955687, 0.2382745806, 0.7256170843, 0.2382745806, -0.1486955687, 0.0492957274,
+    0.0191226842, -0.0409680922, 0.0282752741, -0.0054848168, -0.0088657946, 0.0103932113, -0.0049364911,
+    -0.0002454556, 0.0020410250, -0.0013859498, 0.0003321966, 0.0000971652, -0.0000582377, -0.0000000000,
+];
+
 /// Audio pipeline constants (tuned against the reference emulator).
 const AUDIO_START_DELAY: f64 = -(728.0 / (CPU_HZ / SAMPLE_RATE as f64));
 /// Scale applied to the DC-blocked mixer output.
@@ -45,12 +56,9 @@ fn lp_coef(hz: f64) -> f64 {
     let dt = 1.0 / SAMPLE_RATE as f64;
     dt / (rc + dt)
 }
-const HP1_A: f64 = 0.98726; // ~90 Hz
-const HP2_A: f64 = 0.94133; // ~440 Hz
-const LP_A: f64 = 0.86374; // ~14 kHz
 
 /// PPU dots clocked before the CPU's bus access inside its CPU cycle.
-const ACCESS_PHASE: u32 = 0;
+const ACCESS_PHASE: u32 = 1;
 
 /// Whether DMA "get" (read) cycles fall on even CPU cycles. The reference fixes
 /// this at power-on; it only affects DMA alignment cycles.
@@ -65,12 +73,6 @@ enum Access {
 impl Access {
     fn is_write(&self) -> bool {
         matches!(self, Access::Write(..))
-    }
-    fn addr(&self) -> u16 {
-        match *self {
-            Access::Read(a) => a,
-            Access::Write(a, _) => a,
-        }
     }
 }
 
@@ -116,12 +118,15 @@ pub struct System {
     audio_acc: f64,
     #[cfg(feature = "trace")]
     pub mix_dump: Vec<f32>,
+    #[cfg(feature = "trace")]
+    pub y3_dump: Vec<f32>,
     /// High-pass filter states (DC blockers) and low-pass state.
     hp1_x: f64,
     hp1_y: f64,
     hp2_x: f64,
     hp2_y: f64,
     lp_y: f64,
+    fir_hist: [f64; FIR_TAPS],
 }
 
 impl System {
@@ -147,11 +152,14 @@ impl System {
             audio_acc: 0.0,
             #[cfg(feature = "trace")]
             mix_dump: Vec::new(),
+            #[cfg(feature = "trace")]
+            y3_dump: Vec::new(),
             hp1_x: 0.0,
             hp1_y: 0.0,
             hp2_x: 0.0,
             hp2_y: 0.0,
             lp_y: 0.0,
+            fir_hist: [0.0; FIR_TAPS],
         };
         load_audio_env();
         s.power_on();
@@ -183,6 +191,9 @@ impl System {
         self.hp2_x = 0.0;
         self.hp2_y = 0.0;
         self.lp_y = 0.0;
+        for v in self.fir_hist.iter_mut() {
+            *v = 0.0;
+        }
         self.reset_sequence();
     }
 
@@ -290,6 +301,22 @@ impl System {
         self.apu.dmc_dma_ack(val);
     }
 
+    /// A cycle stolen by DMA: the CPU bus access is replaced by the DMA access.
+    #[inline]
+    fn dma_cycle(&mut self, access: Option<Access>) -> u8 {
+        for _ in 0..ACCESS_PHASE {
+            self.clock_dot(None);
+        }
+        let v = self.clock_dot(access);
+        self.apu.clock(self.cycles);
+        for _ in 0..(2 - ACCESS_PHASE) {
+            self.clock_dot(None);
+        }
+        self.cycles += 1;
+        self.audio_tick();
+        v
+    }
+
     /// One cycle of OAM DMA. Returns true when the DMA has finished.
     fn oam_dma_cycle(&mut self) -> bool {
         let mut phase_write = false;
@@ -320,7 +347,7 @@ impl System {
         } else {
             Some(Access::Read(page_addr))
         };
-        let val = self.raw_cycle(access);
+        let val = self.dma_cycle(access);
         if let Some(d) = self.oam_dma.as_mut() {
             if phase_write {
                 d.writing = false;
@@ -528,7 +555,22 @@ impl System {
             self.hp2_y = y2;
             let y3 = self.lp_y + a3 * (y2 - self.lp_y);
             self.lp_y = y3;
-            let v = (y3 * s_scale).clamp(-32768.0, 32767.0) as i16;
+            #[cfg(feature = "trace")]
+            {
+                if std::env::var("DUMP_Y3").is_ok() {
+                    self.y3_dump.push(y3 as f32);
+                }
+            }
+            // Shift the sample through the FIR history and convolve.
+            for i in 0..(FIR_TAPS - 1) {
+                self.fir_hist[i] = self.fir_hist[i + 1];
+            }
+            self.fir_hist[FIR_TAPS - 1] = y3;
+            let mut acc = 0.0;
+            for i in 0..FIR_TAPS {
+                acc += self.fir_hist[i] * FIR_COEFFS[i];
+            }
+            let v = (acc * s_scale).clamp(-32768.0, 32767.0) as i16;
             self.out.push(v);
         }
     }

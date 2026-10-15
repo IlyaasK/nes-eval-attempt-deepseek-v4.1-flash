@@ -83,7 +83,6 @@ pub struct Ppu {
     ev_n: u8,
     ev_m: u8,
     ev_mode: EvMode,
-    ev_y_in_range: bool,
 
     /// Set when a $2002 read happened exactly one dot before the VBL set.
     vbl_suppress: bool,
@@ -95,8 +94,10 @@ pub struct Ppu {
     /// Current value driven on the PPU address bus (for mapper A12 tracking).
     bus_addr: u16,
     /// Debug: sprite unit 0 state at the end of the last frame.
+    #[cfg(feature = "trace")]
     pub dbg_sp0: SpriteUnit,
     /// Debug: number of opaque sprite pixels emitted in the last frame.
+    #[cfg(feature = "trace")]
     pub dbg_sprite_px: u32,
 }
 
@@ -138,12 +139,13 @@ impl Ppu {
             ev_n: 0,
             ev_m: 0,
             ev_mode: EvMode::CheckY,
-            ev_y_in_range: false,
             vbl_suppress: false,
             nmi_suppress: false,
             oam_addr_write_during_render: false,
             bus_addr: 0,
+            #[cfg(feature = "trace")]
             dbg_sp0: SpriteUnit::default(),
+            #[cfg(feature = "trace")]
             dbg_sprite_px: 0,
         }
     }
@@ -253,15 +255,6 @@ impl Ppu {
         } else {
             idx
         }
-    }
-
-    /// Direct palette RAM read (rendering), with the sprite/background selection.
-    #[inline]
-    fn bg_color(&self, pal: u8, x: u8) -> u16 {
-        let _ = x;
-        let addr = 0x3F00 | (pal as u16);
-        let idx = Self::pal_index(addr);
-        self.palette[idx] as u16 & 0x3F
     }
 
     // --------------------------------------------------------- registers ---
@@ -718,6 +711,7 @@ impl Ppu {
         }
 
         // ------------------------------------------------------- compose ---
+        #[cfg(feature = "trace")]
         if sp_pixel != 0 {
             self.dbg_sprite_px += 1;
         }
@@ -840,9 +834,11 @@ impl Ppu {
 
     /// Advance to the next dot; handles scanline/frame boundaries.
     pub fn advance(&mut self) {
+        #[cfg(feature = "trace")]
         if self.scanline == 0 && self.dot == 0 {
             self.dbg_sprite_px = 0;
         }
+        #[cfg(feature = "trace")]
         if self.scanline == 239 && self.dot == 0 {
             self.dbg_sp0 = self.sprites[0];
         }

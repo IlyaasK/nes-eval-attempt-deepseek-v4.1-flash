@@ -38,12 +38,6 @@ impl PrgRam {
     }
 }
 
-fn rom_slice<'a>(rom: &'a [u8], bank: usize, size: usize) -> &'a [u8] {
-    let n = rom.len() / size;
-    let b = if n == 0 { 0 } else { bank % n };
-    &rom[b * size..(b + 1) * size]
-}
-
 struct ChrMem {
     mem: Vec<u8>,
     ram: bool,
@@ -84,8 +78,6 @@ pub struct Nrom {
     chr: ChrMem,
     ram: PrgRam,
     mirroring: u8,
-    prg_mask: usize,
-    prg_shift: u32,
 }
 
 impl Nrom {
@@ -95,8 +87,6 @@ impl Nrom {
             chr: ChrMem::new(cart),
             ram: PrgRam::new(cart.prg_ram_size),
             mirroring: mirror_from_header(cart.mirroring),
-            prg_mask: 0,
-            prg_shift: 0,
         }
     }
 }
@@ -149,8 +139,6 @@ pub struct Mmc1 {
     prg_bank: u8,
     mirroring: u8,
     ram_enabled: bool,
-    last_write_cycle: u64,
-    prg_ram_writable: bool,
 }
 
 impl Mmc1 {
@@ -167,8 +155,6 @@ impl Mmc1 {
             prg_bank: 0,
             mirroring: mirror_from_header(cart.mirroring),
             ram_enabled: true,
-            last_write_cycle: u64::MAX,
-            prg_ram_writable: true,
         };
         m.apply_control();
         m
@@ -486,13 +472,10 @@ pub struct Mmc3 {
     pub irq_pending: bool,
     a12_low: bool,
     low_dots: u32,
-    mirroring_dirty: bool,
     #[cfg(feature = "trace")]
     pub dot_count: u64,
     #[cfg(feature = "trace")]
     pub clock_count: u64,
-    header_mirroring: u8,
-    ppu_started: bool,
 }
 
 impl Mmc3 {
@@ -515,13 +498,10 @@ impl Mmc3 {
             irq_pending: false,
             a12_low: true,
             low_dots: 0,
-            mirroring_dirty: false,
             #[cfg(feature = "trace")]
             dot_count: 0,
             #[cfg(feature = "trace")]
             clock_count: 0,
-            header_mirroring: mirror_from_header(cart.mirroring),
-            ppu_started: false,
         }
     }
 

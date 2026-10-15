@@ -130,10 +130,7 @@ fn main() {
             let mut oamstr = String::new();
             for j in 0..32 { oamstr.push_str(&format!("{:02X} ", sys.ppu.oam[j])); }
             eprintln!("    nonzero: vram={} chr={} oam={}", nz_vram, nz_chr, nz_oam);
-            let d = &sys.ppu.dbg_sp0;
-            eprintln!("    sprite pixels drawn: {}", sys.ppu.dbg_sprite_px);
-            eprintln!("    sprite0: x={} attr={:02X} lo={:02X} hi={:02X}  (sec_oam {:02X} {:02X} {:02X} {:02X})",
-                d.x, d.attr, d.lo, d.hi, sys.ppu.sec_oam[0], sys.ppu.sec_oam[1], sys.ppu.sec_oam[2], sys.ppu.sec_oam[3]);
+            let _ = &sys.ppu;
             eprintln!("    OAM[0..32]: {}", oamstr);
             let mut nt = String::new();
             for j in 832..864 { nt.push_str(&format!("{:02X} ", sys.ppu.vram[j])); }
