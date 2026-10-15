@@ -49,6 +49,9 @@ def main():
 
     base = int(args.font_base, 16)
     tiles = font_tiles(args.rom, base)
+    if not any(m is not None and m.any() for m in tiles):
+        print("(CHR has no font data at %04X - ROM probably uses CHR-RAM)" % base)
+        return
     img = load(args.frame)
     vals, counts = np.unique(img, return_counts=True)
     bg = int(vals[np.argmax(counts)]) if args.bg is None else int(args.bg, 16)
@@ -72,8 +75,9 @@ def main():
                     if not on.any():
                         total += 64
                         continue
-                    best = max(int(((mask != 0).astype(np.uint8) == on).sum())
-                               for mask in tiles if mask is not None)
+                    cands = [int(((mask != 0).astype(np.uint8) == on).sum())
+                             for mask in tiles if mask is not None and mask.any()]
+                    best = max(cands) if cands else 0
                     total += best
             if total > best_total:
                 best_total, best_off = total, (dy, dx)
@@ -94,7 +98,7 @@ def main():
                 continue
             best, bestscore = "?", -1
             for t, mask in enumerate(tiles):
-                if mask is None:
+                if mask is None or not mask.any():
                     continue
                 # score = matching bits over the 64 pixels
                 score = int(((mask != 0).astype(np.uint8) == on.astype(np.uint8)).sum())

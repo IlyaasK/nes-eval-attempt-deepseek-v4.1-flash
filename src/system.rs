@@ -95,6 +95,24 @@ fn nmi_latch_dots() -> u32 {
     unsafe { NMI_LATCH_DOTS }
 }
 
+/// PPU dots to keep running after the frame boundary before returning.
+static mut FRAME_EXTRA_DOTS: usize = 0;
+#[cfg(feature = "trace")]
+fn frame_extra_dots() -> usize {
+    unsafe {
+        if let Ok(v) = std::env::var("FRAME_EXTRA") {
+            if let Ok(n) = v.parse::<usize>() {
+                FRAME_EXTRA_DOTS = n;
+            }
+        }
+        FRAME_EXTRA_DOTS
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn frame_extra_dots() -> usize {
+    unsafe { FRAME_EXTRA_DOTS }
+}
+
 /// Which dot of the three-dot CPU cycle samples the NMI line (0, 1, or 2).
 static mut NMI_SAMPLE_PHASE: u32 = 0;
 #[cfg(feature = "trace")]
@@ -658,6 +676,11 @@ impl System {
             if guard > 40_000_000 {
                 break;
             }
+        }
+        // The reference's frame ends slightly inside scanline 0 rather than
+        // exactly at the pre-render/scanline-0 boundary.
+        for _ in 0..frame_extra_dots() {
+            self.step();
         }
     }
 
