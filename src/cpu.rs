@@ -1144,7 +1144,7 @@ impl System {
                 let lo = self.fetch();
                 let sp = self.cpu.sp;
                 self.idle_read(0x0100 | sp as u16);
-                let ret = self.cpu.pc.wrapping_add(1);
+                let ret = self.cpu.pc;
                 self.push((ret >> 8) as u8);
                 self.push((ret & 0xFF) as u8);
                 let hi = self.fetch();
@@ -1606,6 +1606,13 @@ impl System {
             }
             // ---- JAM / KIL
             0x02 | 0x12 | 0x22 | 0x32 | 0x42 | 0x52 | 0x62 | 0x72 | 0x92 | 0xB2 | 0xD2 | 0xF2 => {
+                #[cfg(feature = "trace")]
+                {
+                    if std::env::var("TRACE_JAM").is_ok() {
+                        eprintln!("JAM at {:04X} cycle {}", self.cpu.pc.wrapping_sub(1), self.cycles);
+                        eprintln!("history: {}", self.hist.iter().map(|x| format!("{:04X}", x)).collect::<Vec<_>>().join(" "));
+                    }
+                }
                 self.cpu.jammed = true;
             }
         }

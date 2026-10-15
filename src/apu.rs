@@ -63,7 +63,10 @@
 //!
 //! `clock()` must be called exactly once per CPU cycle with a strictly increasing
 //! `cpu_cycle`; duplicate calls for the same cycle are ignored defensively, and
-//! the APU cycle parity is derived from `cpu_cycle & 1`.
+//! the APU cycle parity is derived from `cpu_cycle & 1`. In this module's phase
+//! convention, CPU cycles with `cpu_cycle & 1 == 0` are DMA *get* cycles and the
+//! odd ones are *put* cycles; the system needs that convention for the DMC DMA
+//! halt-cycle rules (see `dmc_dma_is_load`).
 
 // ---------------------------------------------------------------------------
 // Constant tables
@@ -401,6 +404,10 @@ struct Dmc {
     bits_remaining: u8,
     silence: bool,
     output_level: u8,
+    /// Type of the next DMC DMA fetch: `true` = "load" DMA (scheduled by the
+    /// $4015 D4 write with an empty buffer), `false` = "reload" DMA (scheduled
+    /// because the sample buffer emptied during playback). See DMA.md.
+    load_dma: bool,
 }
 
 impl Dmc {
@@ -738,6 +745,10 @@ impl Apu {
                     self.dmc.enabled = true;
                     if self.dmc.bytes_remaining == 0 {
                         self.dmc.restart_sample();
+                        // A fetch scheduled straight from the $4015 write with an
+                        // empty buffer is a load DMA; otherwise the fetch happens
+                        // when the buffered byte is consumed (reload DMA).
+                        self.dmc.load_dma = self.dmc.sample_buffer.is_none();
                     }
                 } else {
                     self.dmc.enabled = false;
@@ -799,6 +810,22 @@ impl Apu {
         self.dmc.sample_buffer.is_none() && self.dmc.bytes_remaining > 0
     }
 
+    /// Type of the pending DMC DMA fetch, valid while [`Apu::dmc_dma_request`] is
+    /// true. `true` = "load" DMA: it was scheduled by a `$4015` write that enabled
+    /// or restarted the sample with an empty buffer, so on hardware the halt
+    /// attempt happens on a *get* cycle during the 2nd APU cycle after that write
+    /// (3 CPU cycles + any write-cycle delays, and the DMA takes 3 cycles).
+    /// `false` = "reload" DMA: it was scheduled because the sample buffer emptied
+    /// during playback; the halt attempt happens on a *put* cycle (the DMA takes
+    /// 4 cycles unless the halt is delayed). See spec/docs/nesdev-wiki/DMA.md.
+    ///
+    /// Cycle-phase convention of this module: CPU cycles with `cpu_cycle & 1 == 0`
+    /// are *get* cycles (the same parity on which the APU itself is ticked), and
+    /// `cpu_cycle & 1 == 1` are *put* cycles.
+    pub fn dmc_dma_is_load(&self) -> bool {
+        self.dmc.load_dma
+    }
+
     pub fn dmc_dma_ack(&mut self, val: u8) {
         if self.dmc.sample_buffer.is_none() && self.dmc.bytes_remaining > 0 {
             self.dmc.sample_buffer = Some(val);
@@ -815,6 +842,9 @@ impl Apu {
                     self.dmc.irq_flag = true;
                 }
             }
+            // Whatever fetch comes next is scheduled because the buffer emptied,
+            // i.e. a reload DMA.
+            self.dmc.load_dma = false;
         }
     }
 

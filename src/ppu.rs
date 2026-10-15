@@ -450,14 +450,22 @@ impl Ppu {
                     }
                 }
 
-                // -------------------------------------------- reload/transfer
-                if dot & 7 == 0 && (8..=256).contains(&dot) || dot == 320 || dot == 328 || dot == 336 {
-                    self.load_shifters();
+                // --------------------------------------------------- pixel ---
+                if sl <= 239 && (1..=256).contains(&dot) {
+                    self.render_pixel(mapper);
+                }
+                // The shift registers also shift during the prefetch phase.
+                if (320..=336).contains(&dot) {
+                    self.shift_registers();
                 }
 
-                // --------------------------------------------------- pixel ---
-                if (1..=256).contains(&dot) {
-                    self.render_pixel(mapper);
+                // -------------------------------------------- reload/transfer
+                if (dot & 7 == 0 && (8..=256).contains(&dot))
+                    || dot == 320
+                    || dot == 328
+                    || dot == 336
+                {
+                    self.load_shifters();
                 }
 
                 // -------------------------------------------- sprite eval ----
@@ -575,6 +583,14 @@ impl Ppu {
         }
     }
 
+    #[inline]
+    fn shift_registers(&mut self) {
+        self.bg_shift_lo <<= 1;
+        self.bg_shift_hi = (self.bg_shift_hi << 1) | 1;
+        self.at_shift_lo <<= 1;
+        self.at_shift_hi <<= 1;
+    }
+
     fn render_pixel(&mut self, _mapper: &mut dyn Mapper) {
         let x = (self.dot - 1) as u8;
         let bg_enabled = self.mask & 0x08 != 0;
@@ -666,6 +682,7 @@ impl Ppu {
         let emph = ((self.mask >> 5) & 7) as u16;
         let sl = self.scanline as usize;
         self.fb[sl * 256 + x as usize] = (emph << 6) | colour;
+        self.shift_registers();
     }
 
     fn backdrop_colour(&self) -> u16 {

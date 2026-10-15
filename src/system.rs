@@ -57,6 +57,8 @@ pub struct System {
 
     /// Pending access to repeat on DMA halt cycles.
     halt_addr: u16,
+    #[cfg(feature = "trace")]
+    pub hist: Vec<u16>,
 
     // Audio output
     pub out: Vec<i16>,
@@ -78,6 +80,8 @@ impl System {
             prev_nmi: false,
             oam_dma: None,
             halt_addr: 0,
+            #[cfg(feature = "trace")]
+            hist: Vec::new(),
             out: Vec::with_capacity(8192),
             audio_acc: 0.0,
         };
@@ -174,7 +178,7 @@ impl System {
             // Reload DMAs need an alignment cycle.
             self.raw_cycle(Some(Access::Read(addr)));
         }
-        let dmc_addr = self.apu.dmc_dma_addr();
+        let dmc_addr = self.apu.dmc_current_address();
         let val = self.raw_cycle(Some(Access::Read(dmc_addr)));
         self.apu.dmc_dma_ack(val);
     }
@@ -328,11 +332,32 @@ impl System {
 
     #[inline]
     pub fn irq_line(&self) -> bool {
-        self.apu.irq_pending() || self.mapper.irq()
+        self.apu.irq_pending() || self.apu.dmc_irq_flag() || self.mapper.irq()
     }
 
     /// Run one CPU instruction (or interrupt sequence, or DMA cycle).
     pub fn step(&mut self) {
+        #[cfg(feature = "trace")]
+        {
+            if std::env::var("TRACE_PC").is_ok() {
+                if let Ok(w) = std::env::var("TRACE_WIN") {
+                    let parts: Vec<u64> = w.split('-').map(|x| x.parse().unwrap()).collect();
+                    if self.cycles >= parts[0] && self.cycles < parts[1] {
+                        if std::env::var("TRACE_SCAN").is_ok() && self.cpu.pc == 0x86ED {
+                            let addr = ((self.ram[5] as u16) << 8 | self.ram[4] as u16).wrapping_add(self.cpu.y as u16);
+                            eprintln!("scan end: ptr=${:04X} Y={:02X} addr=${:04X} rom={:02X} cnt={:02X}{:02X}",
+                                ((self.ram[5] as u16) << 8) | self.ram[4] as u16, self.cpu.y, addr,
+                                self.mapper.prg_read(addr), self.ram[1], self.ram[0]);
+                        }
+                        eprintln!("{:6} PC={:04X} A={:02X} X={:02X} Y={:02X} S={:02X} P={:02X}", self.cycles, self.cpu.pc, self.cpu.a, self.cpu.x, self.cpu.y, self.cpu.sp, self.cpu.p);
+                    }
+                }
+                if self.hist.len() >= 96 {
+                    self.hist.remove(0);
+                }
+                self.hist.push(self.cpu.pc);
+            }
+        }
         if self.oam_dma.is_some() {
             self.oam_dma_cycle();
             return;
