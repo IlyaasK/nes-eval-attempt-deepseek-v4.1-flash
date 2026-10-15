@@ -58,7 +58,7 @@ fn lp_coef(hz: f64) -> f64 {
 }
 
 /// PPU dots clocked before the CPU's bus access inside its CPU cycle.
-const ACCESS_PHASE: u32 = 1;
+const ACCESS_PHASE: u32 = 2;
 
 /// Whether DMA "get" (read) cycles fall on even CPU cycles. The reference fixes
 /// this at power-on; it only affects DMA alignment cycles.
@@ -208,16 +208,6 @@ impl System {
             ppu.process_dot(mapper.as_mut());
         }
         let mut result = self.cpu.bus_latch;
-        // Sample the NMI input on every dot, before any bus access can clear
-        // the vblank flag (the NMI comes from the flag's edge, so a $2002 read
-        // in the same dot does not hide it).
-        {
-            let line = self.ppu.nmi_line();
-            if line && !self.prev_nmi {
-                self.nmi_latch = true;
-            }
-            self.prev_nmi = line;
-        }
         match access {
             Some(Access::Read(addr)) => {
                 result = self.bus_read(addr);
@@ -228,6 +218,17 @@ impl System {
                 self.cpu.bus_latch = val;
             }
             None => {}
+        }
+        // The NMI input is sampled at the end of each PPU dot, that is after
+        // the CPU bus access: a $2002 read in the same dot can therefore
+        // suppress the NMI, but a read that merely clears the flag cannot hide
+        // an edge that has already been asserted.
+        {
+            let line = self.ppu.nmi_line();
+            if line && !self.prev_nmi {
+                self.nmi_latch = true;
+            }
+            self.prev_nmi = line;
         }
         self.ppu.advance();
         result

@@ -35,6 +35,58 @@ fn vbl_set_dot() -> u16 {
 fn vbl_set_dot() -> u16 {
     unsafe { VBL_SET_DOT }
 }
+
+/// Dot of scanline 241 on which a $2002 read drops the vblank flag.
+static mut VBL_DROP_DOT: u16 = 0;
+#[cfg(feature = "trace")]
+fn drop_dot() -> u16 {
+    unsafe {
+        if let Ok(v) = std::env::var("VBL_DROP_DOT") {
+            if let Ok(n) = v.parse::<u16>() {
+                VBL_DROP_DOT = n;
+            }
+        }
+        VBL_DROP_DOT
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn drop_dot() -> u16 {
+    unsafe { VBL_DROP_DOT }
+}
+
+static mut VBL_NMI_WIN: u16 = 6;
+#[cfg(feature = "trace")]
+fn nmi_win() -> u16 {
+    unsafe {
+        if let Ok(v) = std::env::var("VBL_NMI_WIN") {
+            if let Ok(n) = v.parse::<u16>() {
+                VBL_NMI_WIN = n;
+            }
+        }
+        VBL_NMI_WIN
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn nmi_win() -> u16 {
+    unsafe { VBL_NMI_WIN }
+}
+
+static mut VBL_DROP_SL: u16 = 241;
+#[cfg(feature = "trace")]
+fn drop_scanline() -> u16 {
+    unsafe {
+        if let Ok(v) = std::env::var("VBL_DROP_SL") {
+            if let Ok(n) = v.parse::<u16>() {
+                VBL_DROP_SL = n;
+            }
+        }
+        VBL_DROP_SL
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn drop_scanline() -> u16 {
+    unsafe { VBL_DROP_SL }
+}
 fn vbl_suppress_mode() -> u32 {
     unsafe {
         #[cfg(feature = "trace")]
@@ -305,8 +357,9 @@ impl Ppu {
                     }
                 }
                 if vbl_suppress_mode() & 16 != 0
-                    && self.scanline == 241
-                    && (1..=6).contains(&self.dot)
+                    && self.scanline == drop_scanline()
+                    && self.dot >= drop_dot()
+                    && self.dot <= drop_dot() + nmi_win()
                 {
                     // Reads just after the vblank set suppress the NMI without
                     // affecting the flag itself.
@@ -320,8 +373,8 @@ impl Ppu {
                     result &= 0x7F;
                 }
                 if (vbl_suppress_mode() & 16 != 0)
-                    && self.scanline == 241
-                    && self.dot + 1 == vbl_set_dot()
+                    && self.scanline == drop_scanline()
+                    && self.dot == drop_dot()
                 {
                     #[cfg(feature = "trace")]
                     {
@@ -717,6 +770,12 @@ impl Ppu {
 
     fn render_pixel(&mut self, _mapper: &mut dyn Mapper) {
         let x = (self.dot - 1) as u8;
+        #[cfg(feature = "trace")]
+        {
+            if std::env::var("TRACE_ALLPX").is_ok() && self.scanline == 1 && x < 3 {
+                eprintln!("allpx sl=1 dot={} x={}", self.dot, x);
+            }
+        }
         let bg_enabled = self.mask & 0x08 != 0;
         let sp_enabled = self.mask & 0x10 != 0;
 
@@ -802,7 +861,23 @@ impl Ppu {
             (bg_pixel, bg_pal, false)
         };
 
+        #[cfg(feature = "trace")]
+        {
+            if std::env::var("TRACE_SPX").is_ok() && self.scanline == 1 && (x < 12 || (x > 130 && x < 142)) {
+                eprintln!("sl1 x={} sp0 x={} lo={:02X} hi={:02X} opaque={} bgpx={} sec0={:02X}{:02X}{:02X}{:02X}",
+                    x, self.sprites[0].x, self.sprites[0].lo, self.sprites[0].hi, sprite0_opaque, bg_pixel,
+                    self.sec_oam[0], self.sec_oam[1], self.sec_oam[2], self.sec_oam[3]);
+            }
+        }
         if sprite0_opaque && bg_pixel != 0 && x != 255 {
+            #[cfg(feature = "trace")]
+            {
+                if std::env::var("TRACE_SP0HIT").is_ok() {
+                    eprintln!("sprite0 hit sl={} dot={} x={} bgpx={} bgpal={} sppx={} sppal={} ctrl={:02X} mask={:02X} sp0y={:02X} sp0x={:02X} sp0lo={:02X} sp0hi={:02X}",
+                        self.scanline, self.dot, x, bg_pixel, bg_pal, sp_pixel, sp_pal, self.ctrl, self.mask,
+                        self.sprites[0].y, self.sprites[0].x, self.sprites[0].lo, self.sprites[0].hi);
+                }
+            }
             self.status |= 0x40;
         }
 

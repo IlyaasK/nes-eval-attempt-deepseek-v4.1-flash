@@ -75,9 +75,9 @@ def main():
         refs[off] = "".join(seq)
         print("ref offset %d: %s" % (off, refs[off]))
     mine_bin = os.path.join(ROOT, "tools", "nesrun_trace")
-    for mode in sys.argv[1:] or ["1", "16"]:
-        for setdot in ([0, 1, 2, 3] if mode == "16" else [0]):
-            env = {"VBL_SUPPRESS": mode, "VBL_SET_DOT": str(setdot)}
+    for mode in ["16"]:
+        for setdot in [0, 3, 6, 9, 12, 15, 18, 21, 24]:
+            env = {"VBL_SUPPRESS": mode, "VBL_SET_DOT": "1", "VBL_DROP_DOT": str(setdot)}
             total = 0
             ok = 0
             details = []
