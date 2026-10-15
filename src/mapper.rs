@@ -476,7 +476,28 @@ pub struct Mmc3 {
     pub dot_count: u64,
     #[cfg(feature = "trace")]
     pub clock_count: u64,
+    #[cfg(feature = "trace")]
+    pub rise_count: u64,
+    #[cfg(feature = "trace")]
+    pub rises: Vec<(u64, u32)>,
 }
+
+/// Minimum number of PPU dots A12 must stay low for a rising edge to clock the
+/// IRQ counter (three M2 falling edges on real hardware).
+static mut A12_LOW_DOTS: u32 = 9;
+#[cfg(feature = "trace")]
+fn a12_low_dots() -> u32 {
+    unsafe {
+        if let Ok(v) = std::env::var("A12_LOW_DOTS") {
+            if let Ok(n) = v.parse::<u32>() {
+                A12_LOW_DOTS = n;
+            }
+        }
+        A12_LOW_DOTS
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn a12_low_dots() -> u32 { unsafe { A12_LOW_DOTS } }
 
 impl Mmc3 {
     pub fn new(cart: &Cart) -> Mmc3 {
@@ -502,6 +523,10 @@ impl Mmc3 {
             dot_count: 0,
             #[cfg(feature = "trace")]
             clock_count: 0,
+            #[cfg(feature = "trace")]
+            rise_count: 0,
+            #[cfg(feature = "trace")]
+            rises: Vec::new(),
         }
     }
 
@@ -558,11 +583,13 @@ impl Mmc3 {
         if self.irq_counter == 0 || self.irq_reload {
             self.irq_counter = self.irq_latch;
             self.irq_reload = false;
-            if self.irq_enabled {
-                self.irq_pending = true;
-            }
         } else {
             self.irq_counter -= 1;
+        }
+        // "Normal" (Sharp) revision: the IRQ is triggered while the counter is
+        // zero, after the reload/decrement step.
+        if self.irq_counter == 0 && self.irq_enabled {
+            self.irq_pending = true;
         }
     }
 }
@@ -667,7 +694,14 @@ impl Mapper for Mmc3 {
             }
         }
         if a12 {
-            if self.a12_low && self.low_dots >= 3 {
+            if self.a12_low && self.low_dots >= a12_low_dots() {
+                #[cfg(feature = "trace")]
+                {
+                    if std::env::var("TRACE_A12").is_ok() {
+                        self.rises.push((self.dot_count, self.low_dots));
+                    }
+                    self.rise_count += 1;
+                }
                 self.clock_irq();
             }
             self.a12_low = false;

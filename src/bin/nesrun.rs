@@ -19,6 +19,7 @@ fn main() {
     let mut keys: u32 = 0;
     let mut from: u64 = 0;
     let mut bench = false;
+    let mut a12 = false;
     let mut i = 3;
     while i < args.len() {
         match args[i].as_str() {
@@ -61,6 +62,10 @@ fn main() {
             }
             "--bench" => {
                 bench = true;
+                i += 1;
+            }
+            "--a12" => {
+                a12 = true;
                 i += 1;
             }
             other => {
@@ -152,6 +157,14 @@ fn main() {
                 f, sys.ppu.palette[0], sys.ppu.palette[1], sys.ppu.palette[2], sys.ppu.palette[3],
                 sys.ppu.v, sys.ppu.mask, sys.ppu.fb[0]);
         }
+        #[cfg(feature = "trace")]
+        if a12 {
+            if let Some(m) = sys.mapper.as_any().and_then(|a| a.downcast_ref::<nes_emu::mapper::Mmc3>()) {
+                eprintln!("frame {}: a12 rises={} dots={} sl={} ctrl={:02X}", f, m.rise_count, sys.ppu.total_dots, sys.ppu.scanline, sys.ppu.ctrl);
+            }
+        }
+        #[cfg(not(feature = "trace"))]
+        let _ = a12;
         if std::env::args().any(|a| a == "--state") {
             eprintln!("frame {}: cycles={} pc={:04X} ppu ctrl={:02X} mask={:02X} v={:04X} t={:04X} sl={} dot={}",
                 f, sys.cycles, sys.cpu.pc, sys.ppu.ctrl, sys.ppu.mask, sys.ppu.v, sys.ppu.t, sys.ppu.scanline, sys.ppu.dot);

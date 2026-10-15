@@ -1,0 +1,5 @@
+SYMBOLS {
+}
+MEMORY {
+    PRG: start = $8000, size = $8000, type = ro, file = %O;
+}

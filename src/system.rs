@@ -403,9 +403,9 @@ impl System {
         {
             if std::env::var("WRITE_TRACE").is_ok() && ((0x2000..=0x2007).contains(&addr) || addr == 0x4014) {
                 if addr == 0x2007 {
-                    eprintln!("W 2007 <- {:02X} @{} v={:04X} mask={:02X} sl={}", val, self.cycles, self.ppu.v, self.ppu.mask, self.ppu.scanline);
+                    eprintln!("W 2007 <- {:02X} @{} v={:04X} mask={:02X} sl={} dot={}", val, self.cycles, self.ppu.v, self.ppu.mask, self.ppu.scanline, self.ppu.dot);
                 } else {
-                    eprintln!("W {:04X} <- {:02X} @{}", addr, val, self.cycles);
+                    eprintln!("W {:04X} <- {:02X} @{} sl={} dot={} mask={:02X} pc={:04X}", addr, val, self.cycles, self.ppu.scanline, self.ppu.dot, self.ppu.mask, self.cpu.pc);
                 }
             }
         }
