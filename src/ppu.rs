@@ -32,8 +32,24 @@ fn reg_delay() -> u64 {
     unsafe { REG_DELAY }
 }
 
-/// How long the PPU's decay register keeps its value (about 600 ms).
-const DECAY_CYCLES: u32 = 600_000;
+/// How long the PPU's decay register keeps its value; the reference clears it
+/// between 0.4 s and 0.8 s after the last write (about 600 ms = 1.07M PPU dots).
+static mut DECAY_CYCLES: u32 = 3_000_000;
+#[cfg(feature = "trace")]
+fn decay_cycles() -> u32 {
+    unsafe {
+        if let Ok(v) = std::env::var("DECAY_DOTS") {
+            if let Ok(n) = v.parse::<u32>() {
+                DECAY_CYCLES = n;
+            }
+        }
+        DECAY_CYCLES
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn decay_cycles() -> u32 {
+    unsafe { DECAY_CYCLES }
+}
 
 /// Which PPU dot a $2002 read suppresses the vblank set on:
 /// bit 0 = the dot before the set (240,340), bit 1 = the set dot (241,0).
@@ -552,7 +568,16 @@ impl Ppu {
                 {
                     return 0xFF;
                 }
-                self.oam[self.oam_addr as usize]
+                let mut v = self.oam[self.oam_addr as usize];
+                // The three unimplemented bits of a sprite's attribute byte
+                // always read as zero, and the decay register is refreshed with
+                // whatever the read returns.
+                if self.oam_addr & 3 == 2 {
+                    v &= 0xE3;
+                }
+                self.open_bus = v;
+                self.decay_timer = decay_cycles();
+                v
             }
             7 => {
                 let addr = self.v & 0x3FFF;
@@ -568,6 +593,10 @@ impl Ppu {
                 let data = self.vram_read(addr, mapper);
                 let result = self.read_buffer;
                 self.read_buffer = data;
+                // Reading VRAM through $2007 refreshes the decay register with
+                // whatever was returned to the CPU.
+                self.open_bus = result;
+                self.decay_timer = decay_cycles();
                 self.increment_vram_addr();
                 result
             }
@@ -619,10 +648,10 @@ impl Ppu {
     }
 
     pub fn write_register(&mut self, addr: u16, val: u8, mapper: &mut dyn Mapper, warmup: bool) {
-        // Any write to $2000-$3FFF loads the PPU's decay register (bits 0-4),
-        // which $2002 reads return in its low bits.
-        self.open_bus = (self.open_bus & 0xC0) | (val & 0x1F);
-        self.decay_timer = DECAY_CYCLES;
+        // Any write to $2000-$3FFF loads the PPU's decay register with the
+        // whole byte: reads of $2000-$2006 return it, $2002 its low 5 bits.
+        self.open_bus = val;
+        self.decay_timer = decay_cycles();
         // $2000/$2001/$2005/$2006 take effect two PPU dots after the write.
         match addr & 7 {
             0 | 1 | 5 | 6 => {
@@ -715,7 +744,7 @@ impl Ppu {
         if self.decay_timer > 0 {
             self.decay_timer -= 1;
             if self.decay_timer == 0 {
-                self.open_bus &= 0xC0;
+                self.open_bus = 0;
             }
         }
         let sl = self.scanline;

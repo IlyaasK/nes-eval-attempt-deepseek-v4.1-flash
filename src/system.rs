@@ -19,20 +19,23 @@ const FIR_COEFFS: [f64; FIR_TAPS] = [
     -0.0002454556, 0.0020410250, -0.0013859498, 0.0003321966, 0.0000971652, -0.0000582377, -0.0000000000,
 ];
 
-/// Whether the windowed-sinc FIR resampler is applied to the output.
-static mut FIR_ENABLED: bool = true;
+/// Output resampling mode: 0 = hold the chain output, 1 = windowed-sinc FIR,
+/// 2 = linear interpolation between output samples.
+static mut FIR_MODE: u32 = 1;
 #[cfg(feature = "trace")]
-fn fir_enabled() -> bool {
+fn fir_mode() -> u32 {
     unsafe {
         if let Ok(v) = std::env::var("FIR") {
-            FIR_ENABLED = v != "0";
+            if let Ok(n) = v.parse::<u32>() {
+                FIR_MODE = n;
+            }
         }
-        FIR_ENABLED
+        FIR_MODE
     }
 }
 #[cfg(not(feature = "trace"))]
-fn fir_enabled() -> bool {
-    unsafe { FIR_ENABLED }
+fn fir_mode() -> u32 {
+    unsafe { FIR_MODE }
 }
 
 /// Audio pipeline constants (tuned against the reference emulator).
@@ -75,7 +78,7 @@ fn lp_coef(hz: f64) -> f64 {
 
 /// How many consecutive PPU dots the NMI line must be high before the CPU's
 /// edge detector latches an interrupt.
-static mut NMI_LATCH_DOTS: u32 = 2;
+static mut NMI_LATCH_DOTS: u32 = 1;
 #[cfg(feature = "trace")]
 fn nmi_latch_dots() -> u32 {
     unsafe {
@@ -162,6 +165,8 @@ pub struct System {
     pub mix_dump: Vec<f32>,
     #[cfg(feature = "trace")]
     pub y3_dump: Vec<f32>,
+    /// Chain output at the previous output sample (for interpolation).
+    prev_y3: f64,
     /// High-pass filter states (DC blockers) and low-pass state.
     hp1_x: f64,
     hp1_y: f64,
@@ -200,6 +205,7 @@ impl System {
             mix_dump: Vec::new(),
             #[cfg(feature = "trace")]
             y3_dump: Vec::new(),
+            prev_y3: 0.0,
             hp1_x: 0.0,
             hp1_y: 0.0,
             hp2_x: 0.0,
@@ -235,6 +241,7 @@ impl System {
         #[cfg(feature = "trace")]
         self.mix_dump.clear();
         self.audio_acc = AUDIO_START_DELAY;
+        self.prev_y3 = 0.0;
         self.hp1_x = 0.0;
         self.hp1_y = 0.0;
         self.hp2_x = 0.0;
@@ -270,7 +277,11 @@ impl System {
         // the CPU bus access: a $2002 read in the same dot can therefore
         // suppress the NMI, but a read that merely clears the flag cannot hide
         // an edge that has already been asserted.
-        {
+        // The CPU samples the NMI line once per machine cycle, on its bus
+        // access dot; a $2002 read on that dot (or one that clears the vblank
+        // flag before it) hides the edge, which is why reads a dot or two after
+        // the flag set suppress the NMI.
+        if access.is_some() {
             let line = self.ppu.nmi_line();
             if line {
                 self.nmi_high_dots = self.nmi_high_dots.saturating_add(1);
@@ -633,13 +644,21 @@ impl System {
             }
             self.fir_hist[FIR_TAPS - 1] = y3;
             let mut acc = 0.0;
-            if fir_enabled() {
-                for i in 0..FIR_TAPS {
-                    acc += self.fir_hist[i] * FIR_COEFFS[i];
+            match fir_mode() {
+                1 => {
+                    for i in 0..FIR_TAPS {
+                        acc += self.fir_hist[i] * FIR_COEFFS[i];
+                    }
                 }
-            } else {
-                acc = y3;
+                2 => {
+                    // Linear interpolation between the previous and next
+                    // output samples (the chain runs at the CPU rate).
+                    let frac = 1.0 - self.audio_acc;
+                    acc = self.prev_y3 * (1.0 - frac) + y3 * frac;
+                }
+                _ => acc = y3,
             }
+            self.prev_y3 = y3;
             let v = (acc * s_scale).clamp(-32768.0, 32767.0) as i16;
             self.out.push(v);
         }

@@ -18,6 +18,10 @@ the $6000 result byte/ log blargg's suites write), `tools/audiodiff.py`
 | stallar.nes          | 592/600 | 19 |
 | rhde.nes             | 299/300 | 2 |
 
+All four games are now frame-exact apart from a couple of transition frames
+(2/21/19/2 differing pixels over 300 frames), and with an input replay the
+games stay within a few hundred pixels.
+
 With a Start/A input replay the games still follow the reference (robotfindskitten
 and stallar stay within a few hundred pixels over 300 frames).
 
@@ -28,6 +32,8 @@ and stallar stay within a few hundred pixels over 300 frames).
   `__8-dmc_rates` - "Passed"
 * `mmc3_test_2__2-details` - "Passed"
 * `ppu_vbl_nmi__06-suppression` - $00 (passed)
+* `sprite_hit_tests__02..08`, `sprite_overflow_tests__2/3`,
+  `branch_timing_tests__1` - final screen identical to the reference
 * `sprite_hit_tests__02..08`, `sprite_overflow_tests__2.Details`,
   `sprite_overflow_tests__3.Timing`, `branch_timing_tests__1.Branch_Basics` -
   final screen byte-identical to the reference (same verdict)
@@ -45,6 +51,19 @@ and stallar stay within a few hundred pixels over 300 frames).
   `__3-nmi_and_irq`
 * `mmc3_test_2__4-scanline_timing`
 * `ppu_open_bus`
+
+## Notes on the audio pipeline
+
+* The mixer must keep the classic formula's non-zero DC (`95.52/100`,
+  `159.79/100`); the reference's output starts with a decaying transient that a
+  zero-DC mixer never produces (measured with a DMC-DAC step probe: the
+  reference starts at ~6300 and decays).
+* The reference's step response is undelayed, while the 35-tap FIR used here
+  adds a 17-sample group delay.  With the DC enabled and the FIR disabled the
+  step response matches (rms 68 vs 941), but the steady-state music of the
+  games matches better with the FIR and no DC, which is the current default.
+* Output resampling modes are selectable with `FIR=0/1/2` (hold / FIR /
+  linear interpolation) and the mixer DC with `MIX_DC` in trace builds.
 
 ## Audio
 
