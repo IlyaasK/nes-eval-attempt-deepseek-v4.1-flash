@@ -930,10 +930,10 @@ impl Apu {
         (
             p,
             self.pulse[0].envelope.decay,
-            self.pulse[0].constant_volume as u8,
-            self.pulse[0].constant_volume as u8,
-            self.pulse[0].sweep.enabled as u8 | ((self.pulse[0].sweep.shift as u8) << 4),
-            self.pulse[0].sweep.muting(p, true) as u8,
+            self.pulse[0].duty,
+            (self.pulse[0].sequence & 7) | ((self.pulse[0].timer_counter > 0x3FF) as u8) << 4,
+            self.pulse[0].length.value,
+            self.pulse[0].output(PULSE1),
         )
     }
 

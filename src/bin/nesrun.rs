@@ -272,10 +272,11 @@ fn main() {
                 for c in 0..4 {
                     row[5 + c] = sys.len_dump[c].get(i).copied().unwrap_or(0);
                 }
-                if let Some((per, decay, cv, vol, sw, mute)) = sys.p1_dump.get(i) {
-                    row[7] = (per & 0xFF) as u8;
+                if let Some((per, decay, duty, seq, len, out)) = sys.p1_dump.get(i) {
+                    // pack diagnostics: row7 = (duty<<6)|(seq&7)<<3|out_bit, row8 = decay
+                    row[7] = ((*duty & 3) << 6) | ((seq & 7) << 3) | (if *out > 0 { 1 } else { 0 });
                     row[8] = *decay;
-                    let _ = (cv, vol, sw, mute);
+                    let _ = (per, len);
                 }
                 f.write_all(&row).unwrap();
             }

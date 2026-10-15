@@ -89,23 +89,26 @@ fn vbl_set_dot() -> u16 {
     unsafe { VBL_SET_DOT }
 }
 
-static mut ODD_SKIP_IMMEDIATE: bool = true;
+/// Dot of scanline 261 on which the odd frame's clock is skipped.
+static mut ODD_SKIP_DOT: u16 = 340;
+/// Dot of scanline 261 at which the rendering-enabled state that decides the
+/// odd-frame skip is sampled.
+static mut ODD_DECIDE_DOT: u16 = 338;
 #[cfg(feature = "trace")]
-fn odd_skip_immediate() -> bool {
+fn odd_decide_dot() -> u16 {
     unsafe {
-        if let Ok(v) = std::env::var("ODD_SKIP_IMM") {
-            ODD_SKIP_IMMEDIATE = v != "0";
+        if let Ok(v) = std::env::var("ODD_DECIDE_DOT") {
+            if let Ok(n) = v.parse::<u16>() {
+                ODD_DECIDE_DOT = n;
+            }
         }
-        ODD_SKIP_IMMEDIATE
+        ODD_DECIDE_DOT
     }
 }
 #[cfg(not(feature = "trace"))]
-fn odd_skip_immediate() -> bool {
-    unsafe { ODD_SKIP_IMMEDIATE }
+fn odd_decide_dot() -> u16 {
+    unsafe { ODD_DECIDE_DOT }
 }
-
-/// Dot of scanline 261 on which an odd frame's skip is decided.
-static mut ODD_SKIP_DOT: u16 = 339;
 #[cfg(feature = "trace")]
 fn odd_skip_dot() -> u16 {
     unsafe {
@@ -254,6 +257,9 @@ pub struct Ppu {
     pub frame: u64,
     pub total_dots: u64,
     pub odd_frame: bool,
+    /// Rendering-enabled state sampled at `odd_decide_dot()` on the pre-render
+    /// line; the odd-frame skip at dot 340 uses this sample.
+    pub render_at_skip: bool,
     pub frame_complete: bool,
 
     // Background pipeline
@@ -334,6 +340,7 @@ impl Ppu {
             frame: 0,
             total_dots: 0,
             odd_frame: true,
+            render_at_skip: false,
             frame_complete: false,
             bg_latch_nt: 0,
             bg_latch_at: 0,
@@ -378,6 +385,7 @@ impl Ppu {
         self.dot = 0;
         self.frame = 0;
         self.odd_frame = false;
+        self.render_at_skip = false;
         self.frame_complete = false;
         self.bg_latch_nt = 0;
         self.bg_latch_at = 0;
@@ -673,20 +681,6 @@ impl Ppu {
             }
             _ => {}
         }
-    }
-
-    /// Whether rendering is enabled right now according to the mask including
-    /// writes that are still in the two-dot pipeline (used by the odd-frame
-    /// skip decision, which the reference makes on the write itself).
-    fn rendering_enabled_immediate(&self) -> bool {
-        let mut m = self.mask;
-        for i in 0..self.reg_queue_n as usize {
-            let (_, reg, val) = self.reg_queue[i];
-            if reg == 1 {
-                m = val;
-            }
-        }
-        m & 0x18 != 0
     }
 
     fn increment_vram_addr(&mut self) {
@@ -1372,6 +1366,9 @@ impl Ppu {
         if self.scanline == 239 && self.dot == 0 {
             self.dbg_sp0 = self.sprites[0];
         }
+        if self.scanline == 261 && self.dot == odd_decide_dot() {
+            self.render_at_skip = self.rendering_enabled();
+        }
         self.dot += 1;
         self.total_dots += 1;
         let line_len: u16 = 341;
@@ -1387,7 +1384,7 @@ impl Ppu {
         } else if self.scanline == 261
             && self.odd_frame
             && self.dot == odd_skip_dot()
-            && if odd_skip_immediate() { self.rendering_enabled_immediate() } else { self.rendering_enabled() }
+            && self.render_at_skip
         {
             // Odd frames skip the last dot of the pre-render scanline.
             self.dot = 0;

@@ -122,3 +122,17 @@ per-frame sample counts match the reference (0, then 733-734 per frame).
   4 length counters) with `CHDUMP=1` in trace builds.
 * file-fixers/stallar audio differ from the reference (rms ~300-1100); the
   remaining differences are per-note, not a constant delay (alignment scan).
+
+## Current suite status (end of session)
+Passing: ppu_vbl_nmi 02/03/04/06/09, ppu_open_bus, all five apu_test ROMs,
+mmc3_test_2__2-details, cpu_reset__registers (register dump matches spec/ABI).
+Failing: cpu_interrupts_v2__1 (cli_latency: "CLI RTI should not allow any
+IRQs"), cpu_interrupts_v2__3 (nmi_and_irq), mmc3_test_2__4 (scanline timing,
+first check), ppu_vbl_nmi 07/08 (dot-level NMI edge recognition) and 10
+(odd-frame skip decision between dots 339 and 340).
+Game video: 599/600 (robotfindskitten), 598/600 (rhde), 596/600
+(file-fixers), 192/200 (stallar) frame-exact; the differing frames are the
+palette-transition frames with a 2-pixel column at the frame boundary.
+Game audio: robotfindskitten is sample-exact apart from the power-on
+transient; rhde differs by rms ~30; file-fixers/stallar match note-for-note
+in loudness but differ in waveform phase and in a few note choices.

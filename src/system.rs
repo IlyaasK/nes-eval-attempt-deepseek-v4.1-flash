@@ -76,6 +76,25 @@ fn lp_coef(hz: f64) -> f64 {
     dt / (rc + dt)
 }
 
+/// PPU dots to run past the pre-render/scanline-0 boundary before returning
+/// from `emu_run_frame`.
+static mut FRAME_EXTRA_DOTS: usize = 0;
+#[cfg(feature = "trace")]
+fn frame_extra_dots() -> usize {
+    unsafe {
+        if let Ok(v) = std::env::var("FRAME_EXTRA") {
+            if let Ok(n) = v.parse::<usize>() {
+                FRAME_EXTRA_DOTS = n;
+            }
+        }
+        FRAME_EXTRA_DOTS
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn frame_extra_dots() -> usize {
+    unsafe { FRAME_EXTRA_DOTS }
+}
+
 /// How many consecutive samples the NMI line must be high before the CPU's
 /// edge detector latches an interrupt.
 static mut NMI_LATCH_DOTS: u32 = 1;
@@ -657,6 +676,12 @@ impl System {
                 break;
             }
         }
+        // The reference's frame ends a few PPU dots into scanline 0 rather
+        // than exactly at the pre-render/scanline-0 boundary, so the first few
+        // pixels of row 0 in a dumped frame already belong to the new frame.
+        for _ in 0..frame_extra_dots() {
+            self.step();
+        }
     }
 
     // -------------------------------------------------------------- audio ---
@@ -688,8 +713,7 @@ impl System {
                     for c in 0..4 {
                         self.len_dump[c].push(self.apu.length_counter(c));
                     }
-                    let (per, decay, cv, vol, sw, mute) = self.apu.pulse1_debug();
-                    self.p1_dump.push((per, decay, cv, vol, sw, mute));
+                    self.p1_dump.push(self.apu.pulse1_debug());
                 }
             }
             // DC blocking high-pass filters approximating the NES analog stages.
