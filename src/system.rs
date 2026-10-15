@@ -57,6 +57,9 @@ pub struct System {
 
     /// Pending access to repeat on DMA halt cycles.
     halt_addr: u16,
+    /// The reference's first `emu_run_frame` call returns without emulating
+    /// anything, which shifts every subsequent frame boundary by one frame.
+    first_frame: bool,
     #[cfg(feature = "trace")]
     pub hist: Vec<u16>,
 
@@ -80,6 +83,7 @@ impl System {
             prev_nmi: false,
             oam_dma: None,
             halt_addr: 0,
+            first_frame: true,
             #[cfg(feature = "trace")]
             hist: Vec::new(),
             out: Vec::with_capacity(8192),
@@ -103,6 +107,7 @@ impl System {
         self.prev_nmi = false;
         self.oam_dma = None;
         self.halt_addr = 0;
+        self.first_frame = true;
         self.out.clear();
         self.audio_acc = 0.0;
         self.reset_sequence();
@@ -366,6 +371,10 @@ impl System {
     }
 
     pub fn run_frame(&mut self) {
+        if self.first_frame {
+            self.first_frame = false;
+            return;
+        }
         self.ppu.frame_complete = false;
         let mut guard: u64 = 0;
         while !self.ppu.frame_complete {

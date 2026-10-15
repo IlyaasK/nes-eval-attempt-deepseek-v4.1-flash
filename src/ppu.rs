@@ -252,10 +252,17 @@ impl Ppu {
         match addr & 7 {
             2 => {
                 let mut result = (self.status & 0xE0) | (self.open_bus & 0x1F);
-                if self.scanline == 240 && self.dot == 340 {
-                    // One dot before the VBL set: the read suppresses the flag.
+                if (self.scanline == 240 && self.dot == 340) {
+                    // One PPU clock before the VBL set: this read suppresses the
+                    // flag for this frame (and the NMI is not generated).
                     self.vbl_suppress = true;
                     result &= 0x7F;
+                    #[cfg(feature = "trace")]
+                    {
+                        if std::env::var("TRACE_VBL").is_ok() {
+                            eprintln!("VBL suppressed by $2002 read at cycle {}", 0);
+                        }
+                    }
                 }
                 self.status &= !0x80;
                 self.w = false;

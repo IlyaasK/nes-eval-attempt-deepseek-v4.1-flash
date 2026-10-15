@@ -146,14 +146,18 @@ impl System {
     fn am_zp(&mut self) -> u16 {
         self.fetch() as u16
     }
+    /// zp,X (4 cycles: dummy read of the un-indexed address first).
     #[inline]
     fn am_zpx(&mut self) -> u16 {
         let b = self.fetch();
+        self.idle_read(b as u16);
         b.wrapping_add(self.cpu.x) as u16
     }
+    /// zp,Y (4 cycles: dummy read of the un-indexed address first).
     #[inline]
     fn am_zpy(&mut self) -> u16 {
         let b = self.fetch();
+        self.idle_read(b as u16);
         b.wrapping_add(self.cpu.y) as u16
     }
     #[inline]
@@ -205,12 +209,9 @@ impl System {
         (hi << 8) | lo
     }
 
-    /// zp,X for read-modify-write instructions (6 cycles total with the RMW).
     #[inline]
     fn am_zpx_rmw(&mut self) -> u16 {
-        let b = self.fetch();
-        self.idle_read(b as u16);
-        b.wrapping_add(self.cpu.x) as u16
+        self.am_zpx()
     }
     #[inline]
     fn am_indy(&mut self) -> u16 {
