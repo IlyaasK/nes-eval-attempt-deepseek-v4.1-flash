@@ -13,7 +13,7 @@ import sys
 ORIGIN = 0xC000
 
 
-def build(mode: str, vol: int = 15, lo: int = 0xFD, hi: int = 0x00) -> bytes:
+def build(mode: str, vol: int = 15, lo: int = 0xFD, hi: int = 0x00, duty: int = 2) -> bytes:
     code = bytearray()
 
     def e(b):
@@ -33,7 +33,7 @@ def build(mode: str, vol: int = 15, lo: int = 0xFD, hi: int = 0x00) -> bytes:
         e(b"\xa9\x00\x8d\x03\x40")
     elif mode == "pulse":
         e(b"\xa9\x01\x8d\x15\x40")               # enable pulse 1
-        e(b"\xa9" + bytes([0xB0 | (vol & 0x0F)]) + b"\x8d\x00\x40")  # duty 2, halt, const vol
+        e(b"\xa9" + bytes([(duty << 6) | 0x30 | (vol & 0x0F)]) + b"\x8d\x00\x40")
         e(b"\xa9\x00\x8d\x01\x40")               # sweep off
         e(b"\xa9" + bytes([lo]) + b"\x8d\x02\x40")
         e(b"\xa9" + bytes([hi]) + b"\x8d\x03\x40")
@@ -79,5 +79,6 @@ if __name__ == "__main__":
     vol = int(sys.argv[3]) if len(sys.argv) > 3 else 15
     lo = int(sys.argv[4], 0) if len(sys.argv) > 4 else 0xFD
     hi = int(sys.argv[5], 0) if len(sys.argv) > 5 else 0x00
-    open(out, "wb").write(build(mode, vol, lo, hi))
+    duty = int(sys.argv[6], 0) if len(sys.argv) > 6 else 2
+    open(out, "wb").write(build(mode, vol, lo, hi, duty))
     print("wrote", out, mode)

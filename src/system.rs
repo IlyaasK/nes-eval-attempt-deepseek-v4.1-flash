@@ -113,7 +113,7 @@ fn audio_prewarm() -> u32 {
 
 /// Audio pipeline constants (tuned against the reference emulator).
 /// Scale applied to the DC-blocked mixer output.
-static mut AUDIO_SCALE: f64 = 32000.0;
+static mut AUDIO_SCALE: f64 = 32767.0;
 static mut HP1_HZ: f64 = 90.0;
 static mut HP2_HZ: f64 = 440.0;
 static mut LP_HZ: f64 = 150000.0;
