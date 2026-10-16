@@ -602,11 +602,21 @@ impl System {
                 self.apu.read(0x4015, open)
             }
             0x4016 => {
+                // While the strobe is high the shift register is reloaded
+                // continuously, so every read returns button A.
+                if self.strobe {
+                    self.shift[0] = self.keys[0];
+                    self.shift[1] = self.keys[1];
+                }
                 let v = (self.shift[0] & 1) | (self.cpu.bus_latch & 0xE0);
                 self.shift[0] >>= 1;
                 v
             }
             0x4017 => {
+                if self.strobe {
+                    self.shift[0] = self.keys[0];
+                    self.shift[1] = self.keys[1];
+                }
                 let v = (self.shift[1] & 1) | (self.cpu.bus_latch & 0xE0);
                 self.shift[1] >>= 1;
                 v
