@@ -765,6 +765,14 @@ impl System {
         self.cpu_step();
     }
 
+    /// Advance the PPU (and the mapper) by N dots without running the CPU.
+    /// Used to place the frame boundary exactly where the reference has it.
+    fn advance_dots(&mut self, n: usize) {
+        for _ in 0..n {
+            let _ = self.clock_dot(None);
+        }
+    }
+
     pub fn run_frame(&mut self) {
         if self.first_frame {
             self.first_frame = false;

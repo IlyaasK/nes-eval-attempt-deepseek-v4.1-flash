@@ -94,6 +94,23 @@ fn vbl_set_dot() -> u16 {
     unsafe { VBL_SET_DOT }
 }
 
+static mut PAL_DELAY: u64 = 4;
+#[cfg(feature = "trace")]
+fn pal_delay() -> u64 {
+    unsafe {
+        if let Ok(v) = std::env::var("PAL_DELAY") {
+            if let Ok(n) = v.parse::<u64>() {
+                PAL_DELAY = n;
+            }
+        }
+        PAL_DELAY
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn pal_delay() -> u64 {
+    unsafe { PAL_DELAY }
+}
+
 static mut PPU_DOT_LATE: bool = false;
 #[cfg(feature = "trace")]
 fn ppu_dot_late() -> bool {
@@ -483,7 +500,7 @@ impl Ppu {
             // The write reaches palette RAM two PPU dots later.
             let n = self.pending_pal_n as usize;
             if n < self.pending_pal.len() {
-                self.pending_pal[n] = (self.total_dots + 4, idx as u8, val);
+                self.pending_pal[n] = (self.total_dots + pal_delay(), idx as u8, val);
                 self.pending_pal_n += 1;
             } else {
                 self.palette[idx] = val & 0x3F;
