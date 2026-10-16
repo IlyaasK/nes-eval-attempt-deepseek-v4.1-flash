@@ -475,6 +475,7 @@ pub struct Mmc3 {
     pub irq_reload: bool,
     pub irq_enabled: bool,
     pub irq_pending: bool,
+    a12_last: bool,
     a12_low: bool,
     low_dots: u32,
     #[cfg(feature = "trace")]
@@ -522,6 +523,7 @@ impl Mmc3 {
             irq_reload: false,
             irq_enabled: false,
             irq_pending: false,
+            a12_last: false,
             a12_low: true,
             low_dots: 0,
             #[cfg(feature = "trace")]
@@ -584,6 +586,9 @@ impl Mmc3 {
         #[cfg(feature = "trace")]
         {
             self.clock_count += 1;
+            if std::env::var("TRACE_IRQCLK").is_ok() {
+                eprintln!("IRQCLK n={} counter={} reload={} enabled={}", self.clock_count, self.irq_counter, self.irq_reload as u8, self.irq_enabled as u8);
+            }
         }
         if self.irq_counter == 0 || self.irq_reload {
             self.irq_counter = self.irq_latch;
@@ -692,6 +697,13 @@ impl Mapper for Mmc3 {
             self.dot_count += 1;
         }
         let a12 = (addr & 0x1000) != 0;
+        #[cfg(feature = "trace")]
+        {
+            if std::env::var("TRACE_A12EDGE").is_ok() && a12 != self.a12_last {
+                eprintln!("A12EDGE dots={} a12={} addr={:04X}", self.dot_count, a12 as u8, addr);
+                self.a12_last = a12;
+            }
+        }
         #[cfg(feature = "trace")]
         {
             if std::env::var("TRACE_MMC3").is_ok() && self.dot_count > 89000 && self.dot_count < 89060 {
