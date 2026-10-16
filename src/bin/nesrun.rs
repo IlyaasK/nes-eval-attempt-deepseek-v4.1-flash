@@ -153,6 +153,10 @@ fn main() {
             ki += 1;
         }
         sys.run_frame();
+        #[cfg(feature = "trace")]
+        if std::env::var("TRACE_NOISE_CLOCKS").is_ok() {
+            eprintln!("NCLK frame={} clocks={} cycles={} sr={:04X}", f, sys.apu.noise_clocks(), sys.cycles, sys.apu.noise_shift_register());
+        }
         if f >= from {
             if let Some(dir) = &out_dir {
                 let mut buf: Vec<u8> = Vec::with_capacity(61440 * 2);

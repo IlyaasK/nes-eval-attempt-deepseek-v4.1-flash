@@ -378,6 +378,8 @@ impl Triangle {
 
 #[derive(Clone, Copy, Default)]
 struct Noise {
+    /// Diagnostic: number of shift-register clocks since power-on.
+    clocks: u64,
     mode: bool,
     period_index: u8,
     timer_counter: u16,
@@ -395,7 +397,7 @@ impl Noise {
     }
 
     fn clock_timer(&mut self) {
-        // The period table holds exact APU-cycle periods, so the divider counts
+        // The period table holds exact CPU-cycle periods, so the divider counts
         // down from `period` and fires when it reaches 0.
         if self.timer_counter > 0 {
             self.timer_counter -= 1;
@@ -409,6 +411,7 @@ impl Noise {
             };
             let feedback = (self.shift & 1) ^ ((self.shift >> tap) & 1);
             self.shift = ((self.shift >> 1) | (feedback << 14)) & 0x7FFF;
+            self.clocks = self.clocks.wrapping_add(1);
         }
     }
 
@@ -563,7 +566,7 @@ fn dmc_dma_disabled() -> bool {
 }
 
 /// Mixer weight of the noise channel (the classic TND formula uses 2).
-static mut NOISE_WEIGHT: usize = 2;
+static mut NOISE_WEIGHT: usize = 7;
 #[cfg(feature = "trace")]
 fn noise_weight() -> usize {
     unsafe {
@@ -604,7 +607,7 @@ pub struct Apu {
     dmc: Dmc,
     frame: FrameCounter,
     pulse_table: [f32; 31],
-    tnd_table: [f32; 203],
+    tnd_table: [f32; 794],
     /// Last `cpu_cycle` observed by `clock`, used to ignore duplicate calls for
     /// the same CPU cycle (defensive; the contract is one call per cycle).
     last_cycle: u64,
@@ -620,7 +623,7 @@ impl Apu {
             dmc: Dmc::default(),
             frame: FrameCounter::default(),
             pulse_table: [0.0; 31],
-            tnd_table: [0.0; 203],
+            tnd_table: [0.0; 794],
             last_cycle: 0,
             have_last_cycle: false,
         };
@@ -631,11 +634,15 @@ impl Apu {
                 95.52f32 / (8128.0f32 / n as f32 + 100.0f32)
             };
         }
-        for n in 0..203 {
+        // TND weights are (triangle 12, noise 7, DMC 4) - the documented
+        // 8227:12241:22638 ratio scaled by 4 with the noise term trimmed to
+        // match the reference's measured noise level.  The table constant is
+        // scaled by the same factor so the curve is unchanged.
+        for n in 0..794 {
             apu.tnd_table[n] = if n == 0 {
                 0.0
             } else {
-                163.67f32 / (24329.0f32 / n as f32 + 100.0f32)
+                163.67f32 / (97316.0f32 / n as f32 + 100.0f32)
             };
         }
         apu.reset();
@@ -975,9 +982,11 @@ impl Apu {
     /// Instantaneous analog output level (0.0..=1.0), accurate non-linear mixer.
     pub fn mix(&self) -> f32 {
         let pulses = (self.pulse[0].output(PULSE1) + self.pulse[1].output(PULSE2)) as usize;
-        let tnd = 3 * self.triangle.output() as usize
-            + noise_weight() * self.noise.output() as usize
-            + self.dmc.output_level as usize;
+        // Noise is scaled by 4/5 of its nominal weight to match the
+        // reference's measured noise level (see tools: mixcurve).
+        let tnd = 4 * (3 * self.triangle.output() as usize
+            + self.dmc.output_level as usize)
+            + (28 * noise_weight() / 7 * self.noise.output() as usize) / 5;
         // The NES DACs are unipolar, so the mixer has a constant idle offset.
         // The reference keeps it: the output filters turn it into the fixed
         // start-up transient that every one of its recordings begins with.
@@ -1083,6 +1092,10 @@ impl Apu {
     /// Current triangle sequence value (0..15).
     pub fn triangle_sequence(&self) -> u8 {
         self.triangle.output()
+    }
+
+    pub fn noise_clocks(&self) -> u64 {
+        self.noise.clocks
     }
 
     pub fn noise_shift_register(&self) -> u16 {
