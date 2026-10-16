@@ -102,6 +102,11 @@ static mut AUDIO_SCALE: f64 = 32000.0;
 static mut HP1_HZ: f64 = 90.0;
 static mut HP2_HZ: f64 = 440.0;
 static mut LP_HZ: f64 = 40000.0;
+/// Number of CPU cycles averaged before sampling the mixer output.  Sampling
+/// the raw mixer at 44.1 kHz would alias the fastest noise period (223 kHz)
+/// into the audible band; averaging over a few CPU cycles band-limits it the
+/// way the reference's output stage does.
+static mut MIX_AVG: usize = 1;
 
 #[cfg(feature = "trace")]
 fn load_audio_env() {
@@ -117,6 +122,9 @@ fn load_audio_env() {
         }
         if let Ok(v) = std::env::var("A_LP") {
             if let Ok(f) = v.parse::<f64>() { LP_HZ = f; }
+        }
+        if let Ok(v) = std::env::var("A_MIX_AVG") {
+            if let Ok(n) = v.parse::<usize>() { MIX_AVG = n.clamp(1, 16); }
         }
     }
 }
@@ -347,6 +355,9 @@ pub struct System {
     // Audio output
     pub out: Vec<i16>,
     audio_acc: f64,
+    mix_sum: f64,
+    mix_hist: [f64; 16],
+    mix_idx: usize,
     #[cfg(feature = "trace")]
     pub mix_dump: Vec<f32>,
     #[cfg(feature = "trace")]
@@ -403,6 +414,9 @@ impl System {
             hist: Vec::new(),
             out: Vec::with_capacity(8192),
             audio_acc: 0.0,
+            mix_sum: 0.0,
+            mix_hist: [0.0; 16],
+            mix_idx: 0,
             #[cfg(feature = "trace")]
             mix_dump: Vec::new(),
             #[cfg(feature = "trace")]
@@ -967,10 +981,16 @@ impl System {
         // the mixer's idle level, not filtered silence: its output FIR starts
         // from the current value instead of an all-zero history (which would
         // delay the whole signal by the filter's group delay).
+        let raw = self.apu.mix() as f64;
+        let avg = unsafe { MIX_AVG };
+        let leaving = (self.mix_idx + 16 - avg) & 15;
+        self.mix_sum += raw - self.mix_hist[leaving];
+        self.mix_hist[self.mix_idx] = raw;
+        self.mix_idx = (self.mix_idx + 1) & 15;
+        let m = self.mix_sum / avg as f64;
         self.audio_acc += SAMPLE_RATE as f64 / CPU_HZ;
         if self.audio_acc >= 1.0 {
             self.audio_acc -= 1.0;
-            let m = self.apu.mix() as f64;
             #[allow(unused_unsafe)]
             let (s_scale, a1, a2, a3) = unsafe {
                 (

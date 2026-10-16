@@ -599,6 +599,21 @@ fn noise_tap_mode() -> u8 {
 fn noise_tap_mode() -> u8 { unsafe { NOISE_TAP } }
 
 static mut MIX_DC: f32 = 0.25;
+/// Scale applied to the TND table's shape: 1 = the fitted nonlinear curve,
+/// larger values approach a linear mixer (the reference's sums are linear).
+static mut MIX_LIN: f32 = 1.0;
+
+#[cfg(feature = "trace")]
+fn mix_lin() -> f32 {
+    unsafe {
+        if let Ok(v) = std::env::var("A_MIX_LIN") {
+            if let Ok(n) = v.parse::<f32>() { MIX_LIN = n; }
+        }
+        MIX_LIN
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn mix_lin() -> f32 { unsafe { MIX_LIN } }
 
 pub struct Apu {
     pulse: [Pulse; 2],
@@ -638,11 +653,12 @@ impl Apu {
         // 8227:12241:22638 ratio scaled by 4 with the noise term trimmed to
         // match the reference's measured noise level.  The table constant is
         // scaled by the same factor so the curve is unchanged.
+        let m = mix_lin();
         for n in 0..794 {
             apu.tnd_table[n] = if n == 0 {
                 0.0
             } else {
-                163.67f32 / (97316.0f32 / n as f32 + 100.0f32)
+                (163.67f32 * m) / ((97316.0f32 * m) / n as f32 + 100.0f32)
             };
         }
         apu.reset();
