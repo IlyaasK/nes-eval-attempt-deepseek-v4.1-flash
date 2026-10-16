@@ -40,6 +40,21 @@ pub const FLAG_U: u8 = 0x20;
 pub const FLAG_V: u8 = 0x40;
 pub const FLAG_N: u8 = 0x80;
 
+/// Where in the interrupt sequence the pending NMI is polled (0 = before the
+/// low vector byte is read, 1 = between the two vector reads).
+static mut NMI_HIJACK_CYCLE: u32 = 0;
+#[cfg(feature = "trace")]
+fn hijack_cycle() -> u32 {
+    unsafe {
+        if let Ok(v) = std::env::var("NMI_HIJACK_CYCLE") {
+            if let Ok(n) = v.parse::<u32>() { NMI_HIJACK_CYCLE = n.min(1); }
+        }
+        NMI_HIJACK_CYCLE
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn hijack_cycle() -> u32 { unsafe { NMI_HIJACK_CYCLE } }
+
 pub struct Cpu {
     pub a: u8,
     pub x: u8,
@@ -445,13 +460,19 @@ impl System {
         };
         self.push(pushed);
         // NMI hijacking: if the NMI line is asserted before the vector is read,
-        // the NMI vector is used instead.
+        // the NMI vector is used instead.  `NMI_HIJACK_CYCLE` selects the poll
+        // point (0 = before the low vector read, 1 = between the two reads).
+        let hijack = hijack_cycle();
         let mut vec = vector;
-        if self.cpu.nmi_pending {
+        if hijack == 0 && self.cpu.nmi_pending {
             vec = 0xFFFA;
             self.cpu.nmi_pending = false;
         }
         let lo = self.rd(vec) as u16;
+        if hijack == 1 && self.cpu.nmi_pending {
+            vec = 0xFFFA;
+            self.cpu.nmi_pending = false;
+        }
         self.cpu.set_flag(FLAG_I, true);
         let hi = self.rd(vec + 1) as u16;
         self.cpu.pc = (hi << 8) | lo;

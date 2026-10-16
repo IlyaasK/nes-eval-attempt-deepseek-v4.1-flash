@@ -476,6 +476,7 @@ pub struct Mmc3 {
     pub irq_enabled: bool,
     pub irq_pending: bool,
     a12_last: bool,
+    a12_prev_addr: u16,
     a12_low: bool,
     low_dots: u32,
     #[cfg(feature = "trace")]
@@ -524,6 +525,7 @@ impl Mmc3 {
             irq_enabled: false,
             irq_pending: false,
             a12_last: false,
+            a12_prev_addr: 0,
             a12_low: true,
             low_dots: 0,
             #[cfg(feature = "trace")]
@@ -699,13 +701,34 @@ impl Mapper for Mmc3 {
         let a12 = (addr & 0x1000) != 0;
         #[cfg(feature = "trace")]
         {
-            if std::env::var("TRACE_A12EDGE").is_ok() && a12 != self.a12_last {
-                eprintln!("A12EDGE dots={} a12={} addr={:04X}", self.dot_count, a12 as u8, addr);
+            let want_edge = std::env::var("TRACE_A12EDGE").is_ok();
+            let want_rise = std::env::var("TRACE_A12LOW").is_ok();
+            if a12 != self.a12_last {
+                if want_edge {
+                    eprintln!("A12EDGE dots={} a12={} addr={:04X}", self.dot_count, a12 as u8, addr);
+                }
+                if want_rise && a12 && self.low_dots >= a12_low_dots() {
+                    eprintln!("A12RISE dots={} low_dots={} last_addr={:04X}", self.dot_count, self.low_dots, self.a12_prev_addr);
+                }
+                if a12 {
+                    self.a12_prev_addr = addr;
+                }
                 self.a12_last = a12;
             }
         }
         #[cfg(feature = "trace")]
         {
+            if std::env::var("TRACE_LINE").is_ok() {
+                if let Ok(n) = std::env::var("TRACE_LINE").unwrap().parse::<u64>() {
+                    let line = self.dot_count / 341;
+                    if line == n {
+                        eprintln!("LINEDOT {} {:04X} {}", self.dot_count % 341, addr, a12 as u8);
+                    }
+                }
+            }
+            if std::env::var("TRACE_MMC3S").is_ok() && self.dot_count % 997 == 0 {
+                eprintln!("DOTSAMPLE dots={} line={} addr={:04X} a12={} low={}", self.dot_count, self.dot_count / 341, addr, a12 as u8, self.low_dots);
+            }
             if std::env::var("TRACE_MMC3").is_ok() && self.dot_count > 89000 && self.dot_count < 89060 {
                 eprintln!("dot {} addr={:04X} a12={} low_dots={}", self.dot_count, addr, a12 as u8, self.low_dots);
             }
