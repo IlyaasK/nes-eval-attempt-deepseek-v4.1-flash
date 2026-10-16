@@ -390,6 +390,9 @@ pub struct System {
     aa_y: [f64; 4],
     #[cfg(feature = "trace")]
     pub mix_dump: Vec<f32>,
+    /// CPU-rate raw mixer values and each emitted sample's CPU cycle.
+    pub mix_raw: Vec<f32>,
+    pub sample_at: Vec<u64>,
     #[cfg(feature = "trace")]
     pub y3_dump: Vec<f32>,
     #[cfg(feature = "trace")]
@@ -452,6 +455,8 @@ impl System {
             aa_y: [0.0; 4],
             #[cfg(feature = "trace")]
             mix_dump: Vec::new(),
+            mix_raw: Vec::new(),
+            sample_at: Vec::new(),
             #[cfg(feature = "trace")]
             ch_dump: [Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new()],
             #[cfg(feature = "trace")]
@@ -503,6 +508,8 @@ impl System {
         #[cfg(feature = "trace")]
         {
             self.mix_dump.clear();
+        self.mix_raw.clear();
+        self.sample_at.clear();
             self.ch_dump = [Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new()];
             self.len_dump = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
             self.p1_dump.clear();
@@ -1015,6 +1022,12 @@ impl System {
         // from the current value instead of an all-zero history (which would
         // delay the whole signal by the filter's group delay).
         let raw = self.apu.mix() as f64;
+        #[cfg(feature = "trace")]
+        {
+            if std::env::var("MIXRAW").is_ok() {
+                self.mix_raw.push(raw as f32);
+            }
+        }
         let mut m = raw;
         let avg = unsafe { MIX_AVG };
         if avg > 1 {
@@ -1042,6 +1055,12 @@ impl System {
         self.audio_acc += SAMPLE_RATE as f64 / CPU_HZ;
         if self.audio_acc >= 1.0 {
             self.audio_acc -= 1.0;
+            #[cfg(feature = "trace")]
+            {
+                if std::env::var("MIXRAW").is_ok() {
+                    self.sample_at.push(self.cycles);
+                }
+            }
             let m = self.mix_acc / self.mix_n as f64;
             self.mix_acc = 0.0;
             self.mix_n = 0;

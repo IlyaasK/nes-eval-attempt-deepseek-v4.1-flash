@@ -18,6 +18,7 @@ fn main() {
     let mut wav: Option<String> = None;
     let mut chdump: Option<String> = None;
     let mut mixdump: Option<String> = None;
+    let mut mixraw: Option<String> = None;
     let mut keys: u32 = 0;
     let mut from: u64 = 0;
     let mut bench = false;
@@ -72,6 +73,10 @@ fn main() {
             }
             "--mixdump" => {
                 mixdump = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "--mixraw" => {
+                mixraw = Some(args[i + 1].clone());
                 i += 2;
             }
             "--bench" => {
@@ -295,6 +300,22 @@ fn main() {
             elapsed.as_secs_f64(),
             frames as f64 / elapsed.as_secs_f64()
         );
+    }
+
+    if let Some(path) = &mixraw {
+        #[cfg(feature = "trace")]
+        {
+            let mut buf: Vec<u8> = Vec::with_capacity(sys.mix_raw.len() * 4);
+            for v in sys.mix_raw.iter() {
+                buf.extend_from_slice(&v.to_le_bytes());
+            }
+            std::fs::write(path, &buf).expect("write mixraw");
+            let mut b2: Vec<u8> = Vec::with_capacity(sys.sample_at.len() * 8);
+            for v in sys.sample_at.iter() {
+                b2.extend_from_slice(&v.to_le_bytes());
+            }
+            std::fs::write(format!("{}.idx", path), &b2).expect("write sample idx");
+        }
     }
 
     if let Some(path) = &mixdump {
