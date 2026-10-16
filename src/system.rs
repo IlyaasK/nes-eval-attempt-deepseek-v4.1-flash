@@ -110,7 +110,26 @@ fn nmi_level_poll() -> bool {
     unsafe { NMI_LEVEL_POLL }
 }
 
-static mut NMI_PENDING_NOW: bool = true;
+/// Extra CPU cycles of delay before an NMI edge becomes a visible request.
+/// 0 = visible immediately (same cycle), 1 = from the next cycle.
+static mut NMI_DELAY: u32 = 0;
+#[cfg(feature = "trace")]
+fn nmi_delay_cycles() -> u32 {
+    unsafe {
+        if let Ok(v) = std::env::var("NMI_DELAY") {
+            if let Ok(n) = v.parse::<u32>() {
+                NMI_DELAY = n;
+            }
+        }
+        NMI_DELAY
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn nmi_delay_cycles() -> u32 {
+    unsafe { NMI_DELAY }
+}
+
+static mut NMI_PENDING_NOW: bool = false;
 #[cfg(feature = "trace")]
 fn nmi_pending_now() -> bool {
     unsafe {
@@ -225,6 +244,7 @@ pub struct System {
     /// of the next CPU cycle (hardware's edge detector output appears one cycle
     /// after the edge is seen on the line).
     nmi_latch: bool,
+    nmi_latch_delay: u32,
     /// Level-polled NMI: set while the NMI line has already been serviced.
     nmi_serviced: bool,
     /// IRQ line and I-flag state as sampled at the end of the previous cycle.
@@ -286,6 +306,7 @@ impl System {
             cycles: 0,
             prev_nmi: false,
             nmi_latch: false,
+            nmi_latch_delay: 0,
             nmi_serviced: false,
             irq_prev_line: false,
             irq_prev_i: false,
@@ -338,6 +359,7 @@ impl System {
         self.cycles = 0;
         self.prev_nmi = false;
         self.nmi_latch = false;
+        self.nmi_latch_delay = 0;
         self.nmi_serviced = false;
         self.irq_prev_line = false;
         self.irq_prev_i = false;
@@ -372,6 +394,7 @@ impl System {
     pub(crate) fn ppu_only_dot(&mut self) {
         let System { ppu, mapper, .. } = self;
         ppu.process_dot(mapper.as_mut());
+        ppu.advance();
     }
 
     #[inline]
@@ -427,12 +450,14 @@ impl System {
         if line {
             self.nmi_high_dots = self.nmi_high_dots.saturating_add(1);
             if self.nmi_high_dots == nmi_latch_dots() {
-                if nmi_pending_now() {
+                let d = nmi_delay_cycles();
+                if d == 0 {
                     // The interrupt request becomes visible immediately, so an
                     // instruction ending in this same cycle already sees it.
                     self.cpu.nmi_pending = true;
                 } else {
                     self.nmi_latch = true;
+                    self.nmi_latch_delay = d;
                 }
             }
         } else {
@@ -475,6 +500,7 @@ impl System {
     fn cpu_cycle(&mut self, access: Option<Access>) -> u8 {
         if self.nmi_latch {
             self.nmi_latch = false;
+        self.nmi_latch_delay = 0;
         self.nmi_serviced = false;
             self.cpu.nmi_pending = true;
         }

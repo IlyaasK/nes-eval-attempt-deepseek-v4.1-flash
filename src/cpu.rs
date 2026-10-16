@@ -470,9 +470,13 @@ impl System {
         // power-on alignment (PPU at scanline 0, dot 25 at the first opcode
         // fetch, counting the PPU's first dot as dot 1).
         self.idle_read(self.cpu.pc);
+        #[cfg(feature = "trace")]
+        eprintln!("DBG reset: dots={} extra={}", self.ppu.total_dots, power_dots());
         for _ in 0..power_dots() {
             self.ppu_only_dot();
         }
+        #[cfg(feature = "trace")]
+        eprintln!("DBG reset after: dots={}", self.ppu.total_dots);
     }
 
     // ------------------------------------------------------------- stepping ---
