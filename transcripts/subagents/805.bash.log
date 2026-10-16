@@ -1,0 +1,40 @@
+17:| [OAMDATA](#OAMDATA) | $2004 | DDDD DDDD | RW | OAM data read/write |
+18-| [PPUSCROLL](#PPUSCROLL) | $2005 | XXXX XXXX YYYY YYYY | Wx2 | X and Y scroll bits 7-0 (two writes: X scroll, then Y scroll) |
+19-| [PPUADDR](#PPUADDR) | $2006 | ..AA AAAA AAAA AAAA | Wx2 | VRAM address (two writes: most significant byte, then least significant byte) |
+20-| [PPUDATA](#PPUDATA) | $2007 | DDDD DDDD | RW | VRAM data read/write |
+21-| [OAMDMA](#OAMDMA) | $4014 | AAAA AAAA | W | OAM DMA high address |
+22-
+23-Register types:
+--
+34:Reading any readable port (PPUSTATUS, OAMDATA, or PPUDATA) also fills the latch with the bits read.
+35-Reading a nominally "write-only" register returns the latch's current value, as do the unused bits of PPUSTATUS.
+36-At least one bit in this value decays after 3ms to 30ms, faster when the PPU is warm. [[2]](#cite_note-2)
+37-
+38-### PPUCTRL - Miscellaneous settings ($2000 write)
+39-
+40----
+--
+132:During rendering, the PPU is actively using VRAM and OAM. This prevents the CPU from being able to access VRAM via [PPUDATA](#PPUDATA) or OAM via [OAMDATA](#OAMDATA), so these accesses must be done outside of rendering: either during vblank (for data transfers during gameplay) or with rendering turned off (for large data transfers, such as when loading a level). To avoid numerous hardware bugs and limitations, it is generally recommended that rendering be turned on or off only during vblank. This can be done by writing the desired PPUMASK value to a variable rather than the register itself and then only copying that variable to PPUMASK during vblank in the NMI handler.
+133-
+134-The PPU can optionally hide sprites and backgrounds in just the leftmost 8 pixels of the screen, making them transparent and thus drawing the backdrop color there. For sprites, this can be useful to avoid sprite pop-in, a limitation where sprites cannot partially hang off the left edge of the screen like they can off the right edge. For backgrounds, this can eliminate tile artifacts and reduce attribute artifacts when scrolling horizontally with either a vertical or one-screen nametable arrangement, as these arrangements do not allow hiding the scroll seam off-screen. Note that the backdrop color may not match the color used by the art for the background, so disabling the left column may be more distracting than minor artifacts.
+135-
+136-Notes:
+137-
+138-* Writing to PPUDATA during rendering can corrupt VRAM, so writes must be done in vblank or with rendering disabled in PPUMASK bits 3 and 4.
+--
+221:Write the address of [OAM](PPU_OAM.md) you want to access here. Most games just write $00 here and then use [OAMDMA](#OAMDMA). (DMA is implemented in the 2A03/7 chip and works by repeatedly writing to [OAMDATA](#OAMDATA))
+222-
+223-#### Values during rendering
+224-
+225-OAMADDR is set to 0 during each of ticks 257–320 (the sprite tile loading interval) of the pre-render and visible scanlines. This also means that at the end of a normal complete rendered frame, OAMADDR will always have returned to 0.
+226-
+227-If rendering is enabled mid-scanline[[3]](#cite_note-OAMADDR_Clarification-3), there are further consequences of an OAMADDR that was not set to 0 before OAM sprite evaluation begins at tick 65 of the visible scanline. The value of OAMADDR at this tick determines the starting address for sprite evaluation for this scanline, which can cause the sprite at OAMADDR to be treated as it was sprite 0, both for [sprite-0 hit](PPU_OAM.md#Sprite_zero_hits) and priority. If OAMADDR is unaligned and does not point to the Y position (first byte) of an OAM entry, then whatever it points to (tile index, attribute, or X coordinate) will be reinterpreted as a Y position, and the following bytes will be similarly reinterpreted. No more sprites will be found once the end of OAM is reached, effectively hiding any sprites before the starting OAMADDR.
+--
+237:### OAMDATA - Sprite RAM data ($2004 read/write)
+238-
+239----
+240-
+241-```
+242-7  bit  0
+243----- ----
+--

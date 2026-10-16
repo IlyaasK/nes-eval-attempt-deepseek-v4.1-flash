@@ -1,0 +1,64 @@
+### OAMDATA - Sprite RAM data ($2004 read/write)
+
+---
+
+```
+7  bit  0
+---- ----
+DDDD DDDD
+|||| ||||
+++++-++++- OAM data
+```
+
+Write OAM data here. Writes will increment [OAMADDR](#OAMADDR) after the write; reads do not. Reads during vertical or forced blanking return the value from OAM at that address.
+
+**Do not write directly to this register in most cases.** Because changes to OAM should normally be made only during vblank, writing through OAMDATA is only effective for partial updates, as it is too slow to update all of OAM within one vblank interval, and as described above, partial writes cause corruption. Most games use the DMA feature through [OAMDMA](#OAMDMA) instead.
+
+* Reading OAMDATA while the PPU is rendering will expose internal OAM accesses during sprite evaluation and loading; *Micro Machines* does this.
+* Writes to OAMDATA during rendering (on the pre-render line and the visible lines 0–239, provided either sprite or background rendering is enabled) do not modify values in OAM, but do perform a glitchy increment of [OAMADDR](#OAMADDR), bumping only the high 6 bits (i.e., it bumps the *[n]* value in [PPU sprite evaluation](PPU_sprite_evaluation.md) – it's plausible that it could bump the low bits instead depending on the current status of sprite evaluation). This extends to DMA transfers via [OAMDMA](#OAMDMA), since that uses writes to $2004. For emulation purposes, it is probably best to completely ignore writes during rendering.
+* It used to be thought that reading from this register wasn't reliable[[6]](#cite_note-6), however more recent evidence seems to suggest that this is solely due to corruption by [OAMADDR](#OAMADDR) writes.
+* In the oldest instantiations of the PPU, as found on earlier Famicoms and NESes, this register is not readable[[7]](#cite_note-7). The readability was added on the RP2C02G, found on most NESes and later Famicoms.[[8]](#cite_note-8)
+* In the 2C07, sprite evaluation can *never* be fully disabled, and will always start 24 scanlines after the start of vblank[[9]](#cite_note-9) (same as when the prerender scanline would have been on the 2C02). As such, any updates to OAM should be done within the first 24 scanlines after the 2C07 signals vertical blanking.
+
+### PPUSCROLL - X and Y scroll ($2005 write)
+
+---
+
+```
+1st write
+7  bit  0
+---- ----
+XXXX XXXX
+|||| ||||
+++++-++++- X scroll bits 7-0 (bit 8 in PPUCTRL bit 0)
+
+2nd write
+7  bit  0
+---- ----
+YYYY YYYY
+|||| ||||
+++++-++++- Y scroll bits 7-0 (bit 8 in PPUCTRL bit 1)
+```
+
+This register is used to change the [scroll position](PPU_scrolling.md), telling the PPU which pixel of the nametable selected through [PPUCTRL](#PPUCTRL) should be at the top left corner of the rendered screen. PPUSCROLL takes two writes: the first is the X scroll and the second is the Y scroll. Whether this is the first or second write is tracked internally by the [w register](#Internal_registers), which is shared with [PPUADDR](#PPUADDR). Typically, this register is written to during vertical blanking to make the next frame start rendering from the desired location, but it can also be modified during rendering in order to split the screen. Changes made to the vertical scroll during rendering will only take effect on the next frame. Together with the nametable bits in PPUCTRL, the scroll can be thought of as 9 bits per component, and PPUCTRL must be updated along with PPUSCROLL to fully specify the scroll position.
+
+<table>
+<tr><td><div>
+[Image omitted]</div></td><td> <font>The PPU scroll registers <a href="PPU_scrolling.md#PPU_internal_registers">share internal state</a> with the PPU address registers. Because of this, PPUSCROLL and the nametable bits in PPUCTRL should be written <i>after</i> any writes to PPUADDR. </font></td></tr>
+</table>
+
+After reading [PPUSTATUS](#PPUSTATUS) to clear [w (the write latch)](#Internal_registers), write the horizontal and vertical scroll offsets to PPUSCROLL just before turning on the screen:
+
+```
+ ; Set the high bit of X and Y scroll.
+ lda ppuctrl_value
+ ora current_nametable
+ sta PPUCTRL
+
+ ; Set the low 8 bits of X and Y scroll.
+ bit PPUSTATUS
+ lda cam_position_x
+ sta PPUSCROLL
+ lda cam_position_y
+ sta PPUSCROLL
+```

@@ -1,0 +1,15 @@
+10568a8 audio: CPU-rate mixer and sample-time diagnostic dumps for resampler identification
+6089e4f supervisor checkpoint 16h16m
+d8e8a1c audio: output low-pass raised to 150 kHz (reference response is flat across the band, verified via harmonic ratios); sample phase re-calibrated
+# Task: Implement a Nintendo Entertainment System Emulator
+
+Build an NES emulator that matches a reference emulator's output — both video and audio — across a suite of real games and test ROMs. The target is a fully cycle-accurate implementation of the NTSC NES (the 2A03 CPU and APU, the 2C02 PPU, and cartridge mappers 0 (NROM), 1 (MMC1), 2 (UxROM), 3 (CNROM) and 4 (MMC3)) that plays arbitrary games end-to-end fully correctly, including handling user input (button presses, directional pad, held inputs) so that games progress past title screens, through menus, and into actual gameplay. Rendering a correct idle frame is not enough; the emulator must produce correct output for any input sequence. Audio and video are both first-class outputs, you should work on both in parallel as both must be accurate and are extremely difficult to implement correctly. The power-on state is not random: it is specified exactly in `spec/ABI.md`, and your emulator must reproduce it. You must continue working towards this goal indefinitely.
+
+A truly correct NES emulator is not achievable — there is always more to fix. If you believe you are done, you are mistaken. Keep working.
+
+## What's in the container
+
+| Path | Description |
+|------|-------------|
+| `spec/ABI.md` | The interface your wasm must export, including the exact power-on state |
+| `spec/nes_palette.pal` | The palette used to turn your framebuffer's palette indices into colours |

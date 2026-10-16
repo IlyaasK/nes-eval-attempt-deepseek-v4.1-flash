@@ -1,0 +1,120 @@
+[package]
+name = "nes_emu"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+
+[profile.release]
+opt-level = 3
+panic = "abort"
+codegen-units = 1
+
+[features]
+trace = []
+--- src:
+total 176
+drwxrwsr-x 1 agent nes   104 Oct 15 05:48 .
+drwxrwsr-x 1 agent nes   232 Oct 15 03:45 ..
+-rw-rw-r-- 1 agent nes 33996 Oct 15 03:49 apu.rs
+drwxrwsr-x 1 agent nes    18 Oct 15 03:45 bin
+-rw-rw-r-- 1 agent nes 52478 Oct 15 04:22 cpu.rs
+-rw-rw-r-- 1 agent nes  4977 Oct 15 03:25 ines.rs
+-rw-rw-r-- 1 agent nes  2682 Oct 15 05:14 lib.rs
+-rw-rw-r-- 1 agent nes 20835 Oct 15 05:53 mapper.rs
+-rw-rw-r-- 1 agent nes 30867 Oct 15 05:53 ppu.rs
+-rw-rw-r-- 1 agent nes 19501 Oct 15 05:59 system.rs
+--- tools:
+total 116
+drwxrwsr-x 1 agent nes   472 Oct 15 05:39 .
+drwxrwsr-x 1 agent nes   232 Oct 15 03:45 ..
+drwxrwsr-x 1 agent nes   248 Oct 15 05:39 __pycache__
+drwxrwsr-x 1 agent nes    58 Oct 15 05:10 abitest
+-rwxrwxr-x 1 agent nes  1029 Oct 15 05:10 abitest.py
+-rwxrwxr-x 1 agent nes  7418 Oct 15 03:30 audiodiff.py
+-rwxrwxr-x 1 agent nes  3567 Oct 15 03:48 compare.py
+-rwxrwxr-x 1 agent nes  7592 Oct 15 03:30 framediff.py
+-rwxrwxr-x 1 agent nes  5628 Oct 15 03:28 idx2png.py
+-rwxrwxr-x 1 agent nes  3198 Oct 15 05:01 mkaudioprobe.py
+-rwxrwxr-x 1 agent nes  3574 Oct 15 05:32 mkphase.py
+-rwxrwxr-x 1 agent nes  4191 Oct 15 04:05 mkprobe.py
+-rw-rw-r-- 1 agent nes  2107 Oct 15 04:24 mkprobe2.py
+-rwxrwxr-x 1 agent nes  6306 Oct 15 04:47 mkprobe3.py
+-rwxrwxr-x 1 agent nes  8151 Oct 15 03:29 mkrom.py
+-rwxrwxr-x 1 agent nes  3240 Oct 15 05:39 mksprite.py
+-rwxrwxr-x 1 agent nes  3070 Oct 15 04:35 mkvblprobe.py
+-rwxrwxr-x 1 agent nes  3446 Oct 15 05:28 mkvblprobe2.py
+-rwxrwxr-x 1 agent nes 14961 Oct 15 03:30 oracle_ref.py
+-rwxrwxr-x 1 agent nes  1666 Oct 15 04:35 quickdiff.py
+-rwxrwxr-x 1 agent nes  1497 Oct 15 04:14 session_step.py
+-rwxrwxr-x 1 agent nes  5300 Oct 15 04:28 suite.py
+-rwxrwxr-x 1 agent nes   753 Oct 15 04:54 teststatus.py
+--- tmp:
+bad.chr
+bad.idx
+bad.pal
+bad.prg
+base_rfk
+base_st
+cmpf
+diff.ppm
+dm2
+dm3
+dm4
+dm5
+dm6
+dm6b
+dm7
+ds
+e.ppm
+e_mine.idx
+e_ref.idx
+f4.png
+f4b.png
+f4x3.png
+fb.bin
+ff119.png
+file-fixers.chr
+file-fixers.prg
+final.nes
+final.png
+final.ppm
+final.wav
+final_frames
+final_sess
+final_sess.wav
+in.txt
+in2.txt
+in3.txt
+in4.txt
+lo.wav
+mine3.idx
+onebyte.chr
+or.wav
+or1
+or2
+or_s.wav
+or_s2.wav
+or_sf
+or_sf2
+orig_rfk
+orig_st
+pipe
+--- .oracle-out count:
+84
+--- git log:
+ac777a1 supervisor final commit (completed, 2h43m)
+537dda5 supervisor checkpoint 2h30m
+d70268b supervisor checkpoint 2h15m
+5b375cf supervisor checkpoint 2h00m
+124219c supervisor checkpoint 1h45m
+0d7571c supervisor checkpoint 1h30m
+8d65776 supervisor checkpoint 1h15m
+da71ab9 supervisor checkpoint 1h00m
+151339e supervisor checkpoint 0h45m
+d89fea5 supervisor checkpoint 0h30m
+7da080b supervisor checkpoint 0h15m
+4872e93 initial task environment

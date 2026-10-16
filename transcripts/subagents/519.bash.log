@@ -1,0 +1,50 @@
+134-The PPU can optionally hide sprites and backgrounds in just the leftmost 8 pixels of the screen, making them transparent and thus drawing the backdrop color there. For sprites, this can be useful to avoid sprite pop-in, a limitation where sprites cannot partially hang off the left edge of the screen like they can off the right edge. For backgrounds, this can eliminate tile artifacts and reduce attribute artifacts when scrolling horizontally with either a vertical or one-screen nametable arrangement, as these arrangements do not allow hiding the scroll seam off-screen. Note that the backdrop color may not match the color used by the art for the background, so disabling the left column may be more distracting than minor artifacts.
+135-
+136-Notes:
+137-
+138:* Writing to PPUDATA during rendering can corrupt VRAM, so writes must be done in vblank or with rendering disabled in PPUMASK bits 3 and 4.
+139-* Sprite 0 hit does not trigger in any area where the background or sprites are disabled.
+140-* Toggling rendering takes effect approximately 3-4 dots after the write. This delay is required by Battletoads to avoid a crash.
+141-* Toggling rendering mid-screen often corrupts 1 row of OAM and draws incorrect sprites for the current and next scanline. (See: [Errata](Errata.md#OAM_and_Sprites))
+142-* Turning rendering off mid-screen can corrupt palette RAM if the low 14 bits of the [internal v register](#Internal_registers) have a value between $3C00-$3FFF.
+143-* Turning rendering on late causes the dot at the end of pre-render to never be skipped, which can cause dot crawl on stationary screens.
+144-* Turning rendering on late causes the PPU to have an incorrect scroll value unless it is [set manually with a complicated series of writes](PPU_scrolling.md#Split_X/Y_scroll).
+145-
+146-#### Color control
+--
+219-```
+220-
+221-Write the address of [OAM](PPU_OAM.md) you want to access here. Most games just write $00 here and then use [OAMDMA](#OAMDMA). (DMA is implemented in the 2A03/7 chip and works by repeatedly writing to [OAMDATA](#OAMDATA))
+222-
+223:#### Values during rendering
+224-
+225-OAMADDR is set to 0 during each of ticks 257–320 (the sprite tile loading interval) of the pre-render and visible scanlines. This also means that at the end of a normal complete rendered frame, OAMADDR will always have returned to 0.
+226-
+227-If rendering is enabled mid-scanline[[3]](#cite_note-OAMADDR_Clarification-3), there are further consequences of an OAMADDR that was not set to 0 before OAM sprite evaluation begins at tick 65 of the visible scanline. The value of OAMADDR at this tick determines the starting address for sprite evaluation for this scanline, which can cause the sprite at OAMADDR to be treated as it was sprite 0, both for [sprite-0 hit](PPU_OAM.md#Sprite_zero_hits) and priority. If OAMADDR is unaligned and does not point to the Y position (first byte) of an OAM entry, then whatever it points to (tile index, attribute, or X coordinate) will be reinterpreted as a Y position, and the following bytes will be similarly reinterpreted. No more sprites will be found once the end of OAM is reached, effectively hiding any sprites before the starting OAMADDR.
+228-
+229-#### OAMADDR precautions
+230-
+231-On the 2C02G, writes to OAMADDR corrupt OAM. The exact corruption isn't fully described, but this usually seems to copy sprites 8 and 9 (address $20) over the 8-byte row at the target address. The source address for this copy seems to come from the previous value on the CPU BUS (most often $20 from the $2003 operand).[[3]](#cite_note-OAMADDR_Clarification-3)[[4]](#cite_note-OAMglitch-4) There may be other possible behaviors as well. This can then be worked around by writing all 256 bytes of OAM, though due to the limited time before [OAM decay](PPU_OAM.md#Dynamic_RAM_decay) will begin this should normally be done through OAMDMA.
+--
+250-
+251-**Do not write directly to this register in most cases.** Because changes to OAM should normally be made only during vblank, writing through OAMDATA is only effective for partial updates, as it is too slow to update all of OAM within one vblank interval, and as described above, partial writes cause corruption. Most games use the DMA feature through [OAMDMA](#OAMDMA) instead.
+252-
+253-* Reading OAMDATA while the PPU is rendering will expose internal OAM accesses during sprite evaluation and loading; *Micro Machines* does this.
+254:* Writes to OAMDATA during rendering (on the pre-render line and the visible lines 0–239, provided either sprite or background rendering is enabled) do not modify values in OAM, but do perform a glitchy increment of [OAMADDR](#OAMADDR), bumping only the high 6 bits (i.e., it bumps the *[n]* value in [PPU sprite evaluation](PPU_sprite_evaluation.md) – it's plausible that it could bump the low bits instead depending on the current status of sprite evaluation). This extends to DMA transfers via [OAMDMA](#OAMDMA), since that uses writes to $2004. For emulation purposes, it is probably best to completely ignore writes during rendering.
+255-* It used to be thought that reading from this register wasn't reliable[[6]](#cite_note-6), however more recent evidence seems to suggest that this is solely due to corruption by [OAMADDR](#OAMADDR) writes.
+256-* In the oldest instantiations of the PPU, as found on earlier Famicoms and NESes, this register is not readable[[7]](#cite_note-7). The readability was added on the RP2C02G, found on most NESes and later Famicoms.[[8]](#cite_note-8)
+257-* In the 2C07, sprite evaluation can *never* be fully disabled, and will always start 24 scanlines after the start of vblank[[9]](#cite_note-9) (same as when the prerender scanline would have been on the 2C02). As such, any updates to OAM should be done within the first 24 scanlines after the 2C07 signals vertical blanking.
+258-
+259-### PPUSCROLL - X and Y scroll ($2005 write)
+260-
+261----
+262-
+--
+275-|||| ||||
+276-++++-++++- Y scroll bits 7-0 (bit 8 in PPUCTRL bit 1)
+277-```
+278-
+279:This register is used to change the [scroll position](PPU_scrolling.md), telling the PPU which pixel of the nametable selected through [PPUCTRL](#PPUCTRL) should be at the top left corner of the rendered screen. PPUSCROLL takes two writes: the first is the X scroll and the second is the Y scroll. Whether this is the first or second write is tracked internally by the [w register](#Internal_registers), which is shared with [PPUADDR](#PPUADDR). Typically, this register is written to during vertical blanking to make the next frame start rendering from the desired location, but it can also be modified during rendering in order to split the screen. Changes made to the vertical scroll during rendering will only take effect on the next frame. Together with the nametable bits in PPUCTRL, the scroll can be thought of as 9 bits per component, and PPUCTRL must be updated along with PPUSCROLL to fully specify the scroll position.
+280-
+281-<table>
+282-<tr><td><div>

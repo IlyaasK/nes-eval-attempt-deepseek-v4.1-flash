@@ -1,0 +1,46 @@
+# Task: Implement a Nintendo Entertainment System Emulator
+
+Build an NES emulator that matches a reference emulator's output — both video and audio — across a suite of real games and test ROMs. The target is a fully cycle-accurate implementation of the NTSC NES (the 2A03 CPU and APU, the 2C02 PPU, and cartridge mappers 0 (NROM), 1 (MMC1), 2 (UxROM), 3 (CNROM) and 4 (MMC3)) that plays arbitrary games end-to-end fully correctly, including handling user input (button presses, directional pad, held inputs) so that games progress past title screens, through menus, and into actual gameplay. Rendering a correct idle frame is not enough; the emulator must produce correct output for any input sequence. Audio and video are both first-class outputs, you should work on both in parallel as both must be accurate and are extremely difficult to implement correctly. The power-on state is not random: it is specified exactly in `spec/ABI.md`, and your emulator must reproduce it. You must continue working towards this goal indefinitely.
+
+A truly correct NES emulator is not achievable — there is always more to fix. If you believe you are done, you are mistaken. Keep working.
+
+## What's in the container
+
+| Path | Description |
+|------|-------------|
+| `spec/ABI.md` | The interface your wasm must export, including the exact power-on state |
+| `spec/nes_palette.pal` | The palette used to turn your framebuffer's palette indices into colours |
+| `spec/docs/` | NES hardware reference (start at `spec/docs/index.md`) |
+| `dev-roms/` | Example NES ROMs |
+
+Do not attempt to access the internet — the test corpus and grading happen offline against the bundled reference, and pulling code from external sources is not what's being evaluated.
+
+Toolchains available: Rust 1.96 with `wasm32-unknown-unknown`, wasmtime, clang with `wasm-ld`, cmake, cc65 (`ca65`, `ld65`, `da65`) for writing or disassembling 6502 code, python3 with numpy and scipy.
+
+## Tools
+5555163 Prefetch shifts aligned to documented dots 321-336; add frame/APU diagnostics
+8be1d54 Remove A12 delay experiment; keep APU calibration (noise/DMC levels, filter cutoff) and diagnostics
+86c61f6 supervisor checkpoint 12h17m
+269:fn dma_align_mode() -> u8 {
+280:fn dma_align_mode() -> u8 {
+332:    oam_dma: Option<OamDma>,
+394:            oam_dma: None,
+452:        self.oam_dma = None;
+609:        if can_halt && self.apu.dmc_dma_request() {
+615:            self.dmc_dma_run(addr);
+621:    fn dmc_dma_run(&mut self, addr: u16) {
+624:            eprintln!("dma cyc={} pc={:04X}", self.cycles, self.cpu.pc);
+626:        let load = self.apu.dmc_dma_is_load();
+637:        self.apu.dmc_dma_ack(val);
+642:    fn dma_cycle(&mut self, access: Option<Access>) -> u8 {
+663:    fn oam_dma_cycle(&mut self) -> bool {
+669:        match self.oam_dma.as_mut() {
+692:        let val = self.dma_cycle(access);
+693:        if let Some(d) = self.oam_dma.as_mut() {
+703:            self.oam_dma = None;
+759:            if std::env::var("WRITE_TRACE").is_ok() && ((0x2000..=0x2007).contains(&addr) || addr == 0x4014) {
+776:            0x4014 => {
+781:                let dummy_cycles = match dma_align_mode() {
+788:                self.oam_dma = Some(OamDma {
+903:        if self.oam_dma.is_some() {
+904:            self.oam_dma_cycle();

@@ -1,0 +1,178 @@
+# Task: Implement a Nintendo Entertainment System Emulator
+
+Build an NES emulator that matches a reference emulator's output — both video and audio — across a suite of real games and test ROMs. The target is a fully cycle-accurate implementation of the NTSC NES (the 2A03 CPU and APU, the 2C02 PPU, and cartridge mappers 0 (NROM), 1 (MMC1), 2 (UxROM), 3 (CNROM) and 4 (MMC3)) that plays arbitrary games end-to-end fully correctly, including handling user input (button presses, directional pad, held inputs) so that games progress past title screens, through menus, and into actual gameplay. Rendering a correct idle frame is not enough; the emulator must produce correct output for any input sequence. Audio and video are both first-class outputs, you should work on both in parallel as both must be accurate and are extremely difficult to implement correctly. The power-on state is not random: it is specified exactly in `spec/ABI.md`, and your emulator must reproduce it. You must continue working towards this goal indefinitely.
+
+A truly correct NES emulator is not achievable — there is always more to fix. If you believe you are done, you are mistaken. Keep working.
+
+## What's in the container
+
+| Path | Description |
+|------|-------------|
+| `spec/ABI.md` | The interface your wasm must export, including the exact power-on state |
+| `spec/nes_palette.pal` | The palette used to turn your framebuffer's palette indices into colours |
+| `spec/docs/` | NES hardware reference (start at `spec/docs/index.md`) |
+| `dev-roms/` | Example NES ROMs |
+
+Do not attempt to access the internet — the test corpus and grading happen offline against the bundled reference, and pulling code from external sources is not what's being evaluated.
+
+Toolchains available: Rust 1.96 with `wasm32-unknown-unknown`, wasmtime, clang with `wasm-ld`, cmake, cc65 (`ca65`, `ld65`, `da65`) for writing or disassembling 6502 code, python3 with numpy and scipy.
+
+## Tools
+
+**`oracle`** — an NES emulator. You do not have access to the source code. Run `oracle help` to see its interface.
+
+## What you produce
+
+A `.wasm` file implementing the functions in `spec/ABI.md`, built for `wasm32-unknown-unknown` as a cdylib.
+
+## Project layout
+
+Your project must be a Rust cargo project at the **root** of `/task/`:
+
+```
+/task/
+├── Cargo.toml      # [package] name = "nes_emu"
+└── src/
+    └── lib.rs      # [lib] crate-type = ["cdylib", "rlib"]
+```
+
+Required:
+- Package name is `nes_emu` (underscore, not dash). The artifact will be `target/wasm32-unknown-unknown/release/nes_emu.wasm`.
+- Cargo.toml lives at `/task/Cargo.toml`, **not** in a subdirectory like `/task/nes-emu/Cargo.toml`.
+- Do not change the package name or move Cargo.toml once work is underway — external tooling expects a stable artifact path at `target/wasm32-unknown-unknown/release/nes_emu.wasm`.
+- Your cdylib exports the functions in `spec/ABI.md`.
+
+The build is always `cargo build --release --lib --target wasm32-unknown-unknown` run from `/task/` with no `.cargo/config.toml` and no custom `RUSTFLAGS`. Write code that doesn't require those.
+
+## Memory
+
+Wasm linear memory grows on demand at runtime via `memory.grow`. You do not need to statically reserve tens of MB of buffers; allocate with `Vec`/`Box` and let the allocator grow the heap as it needs. Large `static mut` arrays that inflate the initial linear-memory size beyond tens of MB can fail to link.
+=== lib.rs ===
+//! NES emulator wasm ABI (see spec/ABI.md).
+
+#![allow(clippy::missing_safety_doc)]
+
+pub mod apu;
+pub mod cpu;
+pub mod ines;
+pub mod mapper;
+pub mod ppu;
+pub mod system;
+
+use core::ffi::c_int;
+use system::System;
+
+const ROM_BUFFER_SIZE: usize = 8 * 1024 * 1024;
+
+pub struct Emu {
+    pub system: System,
+    pub rom: Vec<u8>,
+    pub rom_len: usize,
+    pub audio: Vec<i16>,
+}
+
+static mut EMU: *mut Emu = core::ptr::null_mut();
+
+#[inline]
+fn emu() -> &'static mut Emu {
+    unsafe {
+        if EMU.is_null() {
+            let mut rom = Vec::new();
+            rom.resize(ROM_BUFFER_SIZE, 0);
+            let e = Box::new(Emu {
+                system: System::new(Box::new(mapper::Null)),
+                rom,
+                rom_len: 0,
+                audio: Vec::with_capacity(16384),
+            });
+            EMU = Box::into_raw(e);
+        }
+        &mut *EMU
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn emu_init() -> c_int {
+    let _ = emu();
+    1
+}
+
+#[no_mangle]
+pub extern "C" fn emu_rom_buffer() -> *mut u8 {
+    emu().rom.as_mut_ptr()
+}
+
+#[no_mangle]
+pub extern "C" fn emu_load_rom(len: c_int) -> c_int {
+    let e = emu();
+    if len <= 0 || len as usize > ROM_BUFFER_SIZE {
+        return 0;
+    }
+    e.rom_len = len as usize;
+    let bytes = &e.rom[..len as usize];
+    match ines::Cart::parse(bytes) {
+        Some(cart) => match mapper::make_mapper(&cart) {
+            Some(m) => {
+                e.system = System::new(m);
+                e.audio.clear();
+                1
+            }
+            None => 0,
+        },
+        None => 0,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn emu_reset() -> c_int {
+    let e = emu();
+    if e.rom_len == 0 {
+        return 0;
+    }
+    // Cold boot: identical state to emu_load_rom, so the cartridge is rebuilt
+    // from the ROM image as well.
+    let len = e.rom_len;
+    emu_load_rom(len as c_int)
+}
+
+#[no_mangle]
+pub extern "C" fn emu_set_keys(k: u32) {
+    let e = emu();
+    e.system.keys[0] = k as u8;
+    e.system.keys[1] = (k >> 8) as u8;
+}
+
+#[no_mangle]
+pub extern "C" fn emu_run_frame() {
+    let e = emu();
+    e.system.run_frame();
+    e.audio.extend_from_slice(&e.system.out);
+    e.system.out.clear();
+}
+
+#[no_mangle]
+pub extern "C" fn emu_framebuffer() -> *mut u16 {
+    emu().system.ppu.fb.as_mut_ptr()
+}
+
+#[no_mangle]
+pub extern "C" fn emu_audio_buffer() -> *mut i16 {
+    let e = emu();
+    if e.audio.capacity() == 0 {
+        e.audio.reserve(16384);
+    }
+    e.audio.as_mut_ptr()
+}
+
+#[no_mangle]
+pub extern "C" fn emu_audio_samples() -> c_int {
+    let e = emu();
+    let n = e.audio.len() as c_int;
+    e.audio.clear();
+    n
+}
+
+#[no_mangle]
+pub extern "C" fn emu_audio_rate() -> c_int {
+    44100
+}

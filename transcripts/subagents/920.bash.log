@@ -1,0 +1,28 @@
+2A03.md
+6502_cycle_times.md
+6502_instructions.md
+APU.md
+APU_DMC.md
+APU_Envelope.md
+APU_Frame_Counter.md
+APU_Length_Counter.md
+APU_Mixer.md
+APU_Noise.md
+APU_Pulse.md
+APU_Sweep.md
+APU_Triangle.md
+APU_basics.md
+APU_period_table.md
+APU_registers.md
+AxROM.md
+Bus_conflict.md
+CNROM.md
+CPU.md
+spec/docs/nesdev-wiki/MMC3.md:224:The MMC3 scanline counter is based entirely on PPU A12, triggered on a rising edge after the line has remained low for three falling edges of M2.[[1]](#cite_note-1)
+spec/docs/nesdev-wiki/MMC3.md:226:The counter is based on the following trick: whenever rendering is turned on in the [PPU](PPU.md), it fetches nametable and BG pattern tiles from dots 0-255 and 320-340 of a scanline and fetches sprite patterns from dots 256-319, even if no sprites are visible.
+spec/docs/nesdev-wiki/MMC3.md:227:Because of this, if BG uses the left pattern table ($0000), and if sprites always use the right pattern table ($1000), this filtered copy of A12 will remain low during all nametable and BG pattern fetches, and high during all sprite pattern fetches, causing it to oscillate exactly one time per scanline and 241 times per frame. It may oscillate more if the program uses registers $2006 and $2007 to access PPU $1000-$1FFF during vblank, but this is rare because very few games have MMC3 and CHR RAM (two on TQROM and three on TGROM among NES games, and a couple more Famicom-only games). The scanline counter partially works when the BG uses the right pattern table ($1000) and the sprites use the left pattern table ($0000), but the [missing dot](PPU_frame_timing.md#Even.2FOdd_Frames) on the 2C02 causes the very first scanline to sometimes count twice. The MMC3 IRQ has two revisions that work slightly different [[1]](http://forums.nesdev.org/viewtopic.php?p=62546#p62546).
+spec/docs/nesdev-wiki/MMC3.md:231:* When the IRQ is clocked (filtered A12 0→1), the counter value is checked - if zero **or** the *reload flag* is true, it's reloaded with the IRQ latched value at $C000; otherwise, it decrements.
+spec/docs/nesdev-wiki/MMC3.md:246:* Writing to $C001 will cause the counter to be cleared, and set *reload flag* to **true**. It will be reloaded on the NEXT rising edge of filtered A12.
+spec/docs/nesdev-wiki/MMC3.md:250:* The counter is clocked on each rising edge of filtered A12, no matter what caused it, so it is possible to (intentionally or not) clock the counter by writing to $2006, regardless of whether PPU is/is not rendering.
+spec/docs/nesdev-wiki/MMC3.md:261:Acclaim's MC-ACC chip is their own variant of the MMC3, that they used for their own boards (for industrial money-saving purposes). It comes in a standard 600 mil 40-pin DIP package. It is not known if it has SRAM support. The only known difference is that the scanline counter [uses a ÷8 prescaler instead of filtering A12](https://forums.nesdev.org/viewtopic.php?p=242427#p242427), clocked by [*falling* edges](https://forums.nesdev.org/viewtopic.php?p=116691#p116691).
+spec/docs/nesdev-wiki/MMC3.md:326:1. [↑](#cite_ref-1) The last page in [Furrtek's reverse-engineered MMC3C schematic](https://github.com/furrtek/VGChips/tree/master/Nintendo/MMC3C) contains the A12 filtering circuit. /C16 here is the IRQ counter clock.

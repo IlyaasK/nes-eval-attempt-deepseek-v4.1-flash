@@ -1,0 +1,13 @@
+53:Writing a value with bit 7 set ($80 through $FF) to any address in $8000-$FFFF clears the shift register to its initial state.
+100:#### Reset
+102:To reset the mapper, which clears the shift register and sets the PRG-ROM bank mode to 3 (fixing the last bank at $C000 and allowing the 16 KB bank at $8000 to be switched), one need only do a single write to any ROM address with a 1 in bit 7:
+105:resetMapper:
+113:Commonly, reset is done with an increment on a negative value to save 2 bytes. Because increment performs two writes, first writing the old value before the incremented one, it is recommended (such as for wider emulator compatibility) that the increment target a value that is negative on both writes, such as the INC opcode ($EE) itself:
+116:resetMapper:
+117:  inc resetMapper
+121:Note that some games do a reset write to each of the 4 registers, even though it is only necessary to do 1 reset write to any register. It is suspected these games do this because of discrete logic implementations of MMC1 on development boards such as the MMC MULTI CHECKER-02, which uses separate shift registers for each MMC1 register.[[1]](#cite_note-1)
+125:When the serial port is written to on consecutive cycles, it ignores every write after the first. In practice, this only happens when the CPU executes read-modify-write instructions, which first write the original value before writing the modified one on the next cycle.[[2]](#cite_note-2) This restriction only applies to the data being written on bit 0; the bit 7 reset is never ignored. *Bill & Ted's Excellent Adventure* does a reset by using INC on a ROM location containing $FF and requires that the $00 write on the next cycle is ignored. *Shinsenden*, however, uses illegal instruction $7F (RRA abs,X) to set bit 7 on the second write and will crash after selecting the みる (look) option if this reset is ignored.[[3]](#cite_note-3) This write-ignore behavior appears to be intentional and is believed to ignore all consecutive write cycles after the first even if that first write does not target the serial port.[[4]](#cite_note-4)
+139:+--------- A write with bit set will reset shift register
+140:            and write Control with (Control OR $0C),
+162:Although [some tests have found that all versions of the MMC1 seems to reliably power on in the last bank](https://forums.nesdev.org/viewtopic.php?t=6766) (by setting the "PRG-ROM bank mode" to 3); [other tests have found that this is fragile](https://forums.nesdev.org/viewtopic.php?f=2&t=14958). Several commercial games have reset vectors every 32 KiB, but not every 16, so evidently PRG-ROM bank mode 2 doesn't seem to occur randomly on power-up.
+sed: <script argument 1>:1:1: error: invalid command code `,'

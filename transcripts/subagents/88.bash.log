@@ -1,0 +1,17 @@
+171-#### Vblank flag
+172-
+173-The vblank flag is set at the start of vblank (scanline 241, dot 1). Reading PPUSTATUS will return the current state of this flag and then clear it. If the vblank flag is not cleared by reading, it will be cleared automatically on dot 1 of the prerender scanline.
+174-
+175:**Reading the vblank flag is not a reliable way to detect vblank. [NMI](https://www.nesdev.org/wiki/NMI_thread) should be used, instead.** Reading the flag on the dot before it is set (scanling 241, dot 0) causes it to read as 0 and be cleared, so polling PPUSTATUS for the vblank flag can miss vblank and cause games to stutter. NMI is also suppressed when this occurs, and may even be suppressed by reads landing on the following dot or two. On NTSC and PAL, it is guaranteed that the flag cannot be dropped two frames in a row, but on Dendy, it is possible for it to [happen every frame](PPU_power_up_state.md#Dendy), crashing the game. Using NMI ensures that software correctly detects vblank every frame. It is also required by PlayChoice-10, which will reject the game if NMI is disabled for too long. Polling the vblank flag is still required while booting up the console, but timing at this point is not critical (see [Init code](https://www.nesdev.org/wiki/Init_code) for more information on booting safely).
+176-
+177-The vblank flag is used in the generation of NMI, and enabling NMI while this flag is 1 will cause an immediate NMI (see [PPUCTRL](#Vblank_NMI)).
+178-
+179-#### Sprite 0 hit flag
+180-
+181-[Sprite 0 hit](PPU_OAM.md#Sprite_zero_hits) is a hardware collision detection feature that detects pixel-perfect collision between the first sprite in OAM (sprite 0) and the background. The sprite 0 hit flag is immediately set when any opaque pixel of sprite 0 overlaps any opaque pixel of background, regardless of sprite priority. 'Opaque' means that the pixel is not 'transparent' — that is, its [two pattern bits](PPU_pattern_tables.md) are not %00. The flag stays set until dot 1 of the prerender scanline; thus, it can only detect one collision per frame.
+182-
+183-Although this flag detects collision, it is primarily used for timing. Many games place sprite 0 at a fixed location on the screen and poll this flag until it becomes set. This allows the CPU to know its approximate location on the screen so it can time mid-screen writes to hardware registers. Commonly, this is used to change the scroll position mid-screen to allow for a background-based HUD, like in *Super Mario Bros.* However, some modern homebrew games use this for actual collision, such as [*Lunar Limit*](https://forums.nesdev.org/viewtopic.php?t=15850) and [*Irritating Ship*](https://fiskbit.itch.io/irritating-ship).
+184-
+185-Sprite 0 hit cannot detect collision at X=255, nor anywhere where either sprites or backgrounds are disabled via [PPUMASK](#PPUMASK). This includes X=0..7 when the leftmost 8 pixels are hidden. However, it is not affected by the cropping on the left and right edges on PAL.
+186-
+187-There are some important considerations when using this flag for timing:

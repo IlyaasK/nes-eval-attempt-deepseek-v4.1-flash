@@ -1,0 +1,98 @@
+224:The MMC3 scanline counter is based entirely on PPU A12, triggered on a rising edge after the line has remained low for three falling edges of M2.[[1]](#cite_note-1)
+225-
+226-The counter is based on the following trick: whenever rendering is turned on in the [PPU](PPU.md), it fetches nametable and BG pattern tiles from dots 0-255 and 320-340 of a scanline and fetches sprite patterns from dots 256-319, even if no sprites are visible.
+227:Because of this, if BG uses the left pattern table ($0000), and if sprites always use the right pattern table ($1000), this filtered copy of A12 will remain low during all nametable and BG pattern fetches, and high during all sprite pattern fetches, causing it to oscillate exactly one time per scanline and 241 times per frame. It may oscillate more if the program uses registers $2006 and $2007 to access PPU $1000-$1FFF during vblank, but this is rare because very few games have MMC3 and CHR RAM (two on TQROM and three on TGROM among NES games, and a couple more Famicom-only games). The scanline counter partially works when the BG uses the right pattern table ($1000) and the sprites use the left pattern table ($0000), but the [missing dot](PPU_frame_timing.md#Even.2FOdd_Frames) on the 2C02 causes the very first scanline to sometimes count twice. The MMC3 IRQ has two revisions that work slightly different [[1]](http://forums.nesdev.org/viewtopic.php?p=62546#p62546).
+228-
+229-Counter operation:
+230-
+231-* When the IRQ is clocked (filtered A12 0→1), the counter value is checked - if zero **or** the *reload flag* is true, it's reloaded with the IRQ latched value at $C000; otherwise, it decrements.
+232-* If the IRQ counter is zero *and* IRQs are enabled ($E001), an IRQ is triggered. The "alternate revision" checks the IRQ counter transition 1→0, whether from decrementing or reloading.
+233-
+234-Regarding PPU A12:
+235-
+236-* When using 8x8 sprites, if the BG uses $0000, and the sprites use $1000, the IRQ counter should decrement on PPU cycle 260, right after the visible part of the target scanline has ended.
+237-* When using 8x8 sprites, if the BG uses $1000, and the sprites use $0000, the IRQ counter should decrement on PPU cycle 324 of the *previous* scanline (as in, *right before* the target scanline is about to be drawn). However, the 2C02's pre-render scanline will decrement the counter twice every other vertical redraw, so the IRQ will shake one scanline. This is visible in **Wario's Woods**: with some PPU-CPU reset alignments the bottom line of the green grass of the play area may flicker black on the rightmost ~48 pixels, due to an extra count firing the IRQ one line earlier than expected.
+238-* When using 8x16 sprites *PPU A12 must be explicitly tracked*. The exact time and number of times the counter is clocked will depend on the specific set of sprites present on every scanline. Specific combinations of sprites could cause the counter to decrement up to four times, or the IRQ to be delayed *or early* by some multiple of 8 pixels. If there are fewer than 8 sprites on a scanline, the PPU fetches tile $FF ($1FE0-$1FFF) for each leftover sprite and discards its value. Thus if a game uses 8x16 sprites with its background and sprites from PPU $0000, then the MMC3 ends up counting each scanline that *doesn't* use all eight sprites.
+239-
+240-Important points:
+241-
+242:* The scanline counter cannot be stopped. It will continue to decrement and reload as long as PPU A12 on the PPU bus toggles.
+243-* There is no direct access to the counter! The best that can be done is update the reload value and immediately request a reload.
+244-* Writing to $E000 will only prevent the MMC3 from generating IRQs - the counter will continue to run.
+245-* Writing to $E001 will simply allow the MMC3 to generate IRQs - the counter remains unaffected.
+246-* Writing to $C001 will cause the counter to be cleared, and set *reload flag* to **true**. It will be reloaded on the NEXT rising edge of filtered A12.
+247-* Writing to $C000 does not immediately affect the value within the counter - this value is only used when the counter is reloaded, whether from reaching 0 or from writing to $C001.
+248-* The exact number of scanlines between IRQs is N+1, where N is the value written to $C000. 1 (Sharp MMC3B, MMC3C) or 2 (MMC3A, Non-Sharp MMC3B) to 256 scanlines are supported.
+249-* The counter will not work properly unless different pattern tables for background and sprite data are in use. The standard configuration is to use PPU $0000-$0FFF for background tiles and $1000-$1FFF for sprite tiles, whether 8x8 or 8x16.
+250-* The counter is clocked on each rising edge of filtered A12, no matter what caused it, so it is possible to (intentionally or not) clock the counter by writing to $2006, regardless of whether PPU is/is not rendering.
+251-
+252-There's a slight discrepancy with what happens when $C000 is set to $00, and so far, two behaviors are known to exist:
+253-
+254:* MMC3 made by NEC generates only a single IRQ when $C000 is $00. This version of the MMC3 generates IRQs when the scanline counter is *decremented* to 0. In addition, writing to $C001 with $C000 still at $00 will result in another single IRQ being generated. In the community, this has been known as the "alternate" or "old" behavior.
+255:* MMC3 made by Sharp generates an IRQ on each scanline while $C000 is $00. This version of the MMC3 generates IRQs when the scanline counter is *equal* to 0. In the community, this has been known as the "normal" or "new" behavior.
+256-
+257-Even on Sharp style MMC3, writing $C001 on consecutive scanlines can cause pathological behavior that Blargg and N-K encountered. See [MMC3 IRQ Tests by blargg](https://github.com/christopherpow/nes-test-roms/blob/master/mmc3_irq_tests/readme.txt) and [test ROM by N-K](https://forums.nesdev.org/viewtopic.php?p=261236#p261236). Because this behavior is not fully understood, emulators do not yet emulate it, though it'd be nice for a debugging emulator to break on $C001 writes without two intervening timer clocks.
+258-
+259-* Many MMC3 games do not write $C001 in the IRQ handler, instead updating only $C000 to be applied at start of the *next* IRQ. By updating $C000 one interrupt ahead, this issue with $C001 can be avoided.
+260-
+261:Acclaim's MC-ACC chip is their own variant of the MMC3, that they used for their own boards (for industrial money-saving purposes). It comes in a standard 600 mil 40-pin DIP package. It is not known if it has SRAM support. The only known difference is that the scanline counter [uses a ÷8 prescaler instead of filtering A12](https://forums.nesdev.org/viewtopic.php?p=242427#p242427), clocked by [*falling* edges](https://forums.nesdev.org/viewtopic.php?p=116691#p116691).
+262-
+263-## Variants
+264-
+265-### Board wiring variants
+266-
+267-The TKSROM and TLSROM boards, assigned to [INES Mapper 118](https://www.nesdev.org/wiki/INES_Mapper_118), connect the upper bank select line directly to VRAM A10, allowing more flexible control over nametable arrangement.
+268-
+269-The TQROM board, assigned to [INES Mapper 119](https://www.nesdev.org/wiki/INES_Mapper_119), uses both CHR ROM and CHR RAM simultaneously, using the 2nd-highest CHR bank select line to choose between them (on a per-bank basis).
+270-
+271-Nintendo made at least two MMC3-based multicart mappers: mappers [37](https://www.nesdev.org/wiki/INES_Mapper_037) and [47](https://www.nesdev.org/wiki/INES_Mapper_047).
+272-
+273-### Nintendo MMC3 chip variants
+274-
+275-IRQ behavior when reload is set to 0 differs among different MMC3 chips.
+276-Sharp MMC3 chips generate an IRQ every scanline.
+277-(These include at least MMC3B chips bearing a bold S before the date code.)
+278-NEC MMC3 chips cease to generate IRQs.
+279-(These include MMC3B chips lacking the S and having a date code of the form nnnnPKnnn, and an MMC3A 8940EP chip.)
+280-Some games have been manufactured with both versions.
+281-A few later games, such as *[Star Trek: 25th Anniversary](https://nescartdb.com/profile/view/249/star-trek-25th-anniversary)*, rely on the Sharp behavior (source: Nestopia 1.30 changelog).
+282-
+283-There's an anecdotal report that [*Felix the Cat* needs MMC3A](https://forums.nesdev.org/viewtopic.php?p=124478#p124478), but it's necessarily not related to the IRQ behavior since the game works correctly in emulators that only implement the Sharp behavior.
+284-
+285-### MMC3-like chips variants
+286-
+287-The [DxROM](https://www.nesdev.org/wiki/DxROM) board, assigned to [iNES Mapper 206](https://www.nesdev.org/wiki/INES_Mapper_206) has a custom mapper developed by Namco before the MMC3 existed. It has no IRQ nor control over nametable arrangement.
+288-Tengen used it for some of their games under the name MIMIC-1.
+289-It exists both in a [400 mil 28-pin Shrink-DIP](https://www.nesdev.org/wiki/Namcot_108_family_pinout) (found in licensed [DxROM](https://www.nesdev.org/wiki/DxROM) boards) and in a larger 600 mil 28-pin DIP (found in unlicensed Tengen cartridges).
+290-
+291-The Namco 108/MIMIC-1 does the basic ROM banking exactly like the MMC3, but it only implements the low 3 bits of $8000 and the low 6 bits of $8001. Compared to the MMC3, it lacks nametable control, SRAM support and an IRQ counter. The TEROM and TFROM boards have been developed with backward compatibility with [DxROM](https://www.nesdev.org/wiki/DxROM) in mind, featuring solder pads to have hardwired H/V nametables instead of controlled by the MMC3, and allow the hardware to disable IRQs.
+292-
+293-### Pirate variants
+294-
+295-* [Mapper 004 submapper 5](https://www.nesdev.org/wiki/NES_2.0_submappers#004:_5_T9552) is a Waixing variant with a software-controlled [T9552](https://www.nesdev.org/wiki/T9552) chip that scrambles PRG/CHR address lines. Known games all initialize the chip with the same canonical pattern, so they can be dumped as MMC3 compatible ROMs, but the submapper designation allows accurate emulation of the scrambling. This was formerly assigned as mapper 249 (now deprecated), with the banks in scrambled order instead.
+296-* [Mapper 115](https://www.nesdev.org/wiki/INES_Mapper_115) increases CHR to 512K by losing PRG RAM and contains an [UxROM](UxROM.md) emulation mode.
+297-* [Mapper 182](https://www.nesdev.org/wiki/INES_Mapper_114)'s registers are only in a different order.
+298-* [Mapper 187](https://www.nesdev.org/wiki/INES_Mapper_187) increases CHR to 512K by wiring PPU A12 directly to CHR A18.
+299-* [Mapper 189](https://www.nesdev.org/wiki/INES_Mapper_189) loses the MMC3's 8+8+16F banking scheme in exchange for 32k-at-a-time banking like [AxROM](AxROM.md), [BxROM](https://www.nesdev.org/wiki/BNROM), or [GxROM](https://www.nesdev.org/wiki/GxROM).
+300-* Mappers [194](https://www.nesdev.org/wiki/INES_Mapper_194), [192](https://www.nesdev.org/wiki/INES_Mapper_192), [191](https://www.nesdev.org/wiki/INES_Mapper_191), and [74](https://www.nesdev.org/wiki/INES_Mapper_074), are like TQROM in that they combine CHR ROM and CHR RAM by replacing some CHR pages with CHR RAM.
+301-* Mappers [205](https://www.nesdev.org/wiki/INES_Mapper_205), [52](https://www.nesdev.org/wiki/INES_Mapper_052), [49](https://www.nesdev.org/wiki/INES_Mapper_049), [45](https://www.nesdev.org/wiki/INES_Mapper_045), and [44](https://www.nesdev.org/wiki/INES_Mapper_044) force unmodified games together in a multicart.
+302-* [Mapper 245](https://www.nesdev.org/wiki/INES_Mapper_245) increases PRG to 1024K by losing CHR ROM.
+303-
+304-### iNES Mapper 004 and MMC6
+305-
+306-The unfortunate conflation of MMC3 and [MMC6](https://www.nesdev.org/wiki/MMC6) into the same iNES mapper can be resolved by the use of [NES 2.0 submapper 004:1](https://www.nesdev.org/wiki/NES_2.0_submappers#004:_1_MMC6).
+307-
+308-Since the new header is not yet well adopted among emulators or ROM sets, an approach that supports both MMC3 and MMC6 may be desired when an NES 2.0 header is not used.
+309-
+310-The MMC6 has a smaller PRG-RAM, and a different register scheme for write protecting it.
+311-
+312-Because write protection is generally only used to guard against corruption during power off, many implementations of iNES Mapper 004 simply omit the write protection. Leaving PRG-RAM always write-enabled removes most of the incompatibility between MMC3 and MMC6, and is sufficient to support *StarTropics* and *StarTropics II*, which are the only commercial games using this mapper. These games do not rely on the smaller PRG-RAM size of the MMC6, so the larger 8k RAM addressed by the MMC3 is not a problem.
+313-
+314-The less well known game *Low G Man* is problematic. It used an MMC3 board with no PRG-RAM. Because of a bug in its music code, it relies on [open bus behavior](Open_bus_behavior.md) in the RAM's address range to function correctly. The game does use the MMC3 mechanism to disable RAM, so it may function on an MMC3 board with PRG-RAM, but implementing the MMC3 RAM disable may conflict with the effort to support MMC6 games. Alternatively, NES 2.0 could be used to specify a PRG-RAM size of 0, or the problem can be resolved by [patching](http://www.romhacking.net/hacks/2512/) the Low G Man ROM to work around the conflict.
+315-
+316-## See also
+317-
+318-* [Programming MMC3](https://www.nesdev.org/wiki/Programming_MMC3)
+319-* [MMC3-like mappers](https://www.nesdev.org/wiki/Category:MMC3-like_mappers)
+320-* [NES Mapper list](https://www.romhacking.net/documents/362/) by Disch.
+321-* [Nintendo MMC3](https://nesdev.org/mmc3.txt) by goroh.

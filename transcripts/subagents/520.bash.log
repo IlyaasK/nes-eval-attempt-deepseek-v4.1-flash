@@ -1,0 +1,59 @@
+# Task: Implement a Nintendo Entertainment System Emulator
+
+Build an NES emulator that matches a reference emulator's output — both video and audio — across a suite of real games and test ROMs. The target is a fully cycle-accurate implementation of the NTSC NES (the 2A03 CPU and APU, the 2C02 PPU, and cartridge mappers 0 (NROM), 1 (MMC1), 2 (UxROM), 3 (CNROM) and 4 (MMC3)) that plays arbitrary games end-to-end fully correctly, including handling user input (button presses, directional pad, held inputs) so that games progress past title screens, through menus, and into actual gameplay. Rendering a correct idle frame is not enough; the emulator must produce correct output for any input sequence. Audio and video are both first-class outputs, you should work on both in parallel as both must be accurate and are extremely difficult to implement correctly. The power-on state is not random: it is specified exactly in `spec/ABI.md`, and your emulator must reproduce it. You must continue working towards this goal indefinitely.
+
+A truly correct NES emulator is not achievable — there is always more to fix. If you believe you are done, you are mistaken. Keep working.
+
+## What's in the container
+
+| Path | Description |
+|------|-------------|
+| `spec/ABI.md` | The interface your wasm must export, including the exact power-on state |
+| `spec/nes_palette.pal` | The palette used to turn your framebuffer's palette indices into colours |
+| `spec/docs/` | NES hardware reference (start at `spec/docs/index.md`) |
+| `dev-roms/` | Example NES ROMs |
+
+Do not attempt to access the internet — the test corpus and grading happen offline against the bundled reference, and pulling code from external sources is not what's being evaluated.
+
+Toolchains available: Rust 1.96 with `wasm32-unknown-unknown`, wasmtime, clang with `wasm-ld`, cmake, cc65 (`ca65`, `ld65`, `da65`) for writing or disassembling 6502 code, python3 with numpy and scipy.
+
+## Tools
+
+**`oracle`** — an NES emulator. You do not have access to the source code. Run `oracle help` to see its interface.
+
+## What you produce
+
+A `.wasm` file implementing the functions in `spec/ABI.md`, built for `wasm32-unknown-unknown` as a cdylib.
+
+## Project layout
+
+Your project must be a Rust cargo project at the **root** of `/task/`:
+
+```
+/task/
+├── Cargo.toml      # [package] name = "nes_emu"
+└── src/
+    └── lib.rs      # [lib] crate-type = ["cdylib", "rlib"]
+```
+
+Required:
+- Package name is `nes_emu` (underscore, not dash). The artifact will be `target/wasm32-unknown-unknown/release/nes_emu.wasm`.
+=== git ===
+8005337 supervisor checkpoint 3h45m
+a95205e supervisor checkpoint 3h30m
+254de65 supervisor checkpoint 3h15m
+9aa05a4 supervisor checkpoint 3h00m
+a3ba361 supervisor checkpoint 2h45m
+1c32cd8 supervisor checkpoint 2h30m
+7e716f0 supervisor checkpoint 2h15m
+e463e6f supervisor checkpoint 2h00m
+=== status ===
+ M src/system.rs
+ M tools/STATUS.md
+ M tools/nesrun_trace
+?? tmp/irqprobe.nes
+?? tmp/pprobe.nes
+?? tmp/sh02_mine.png
+?? tmp/sh02_ref.png
+?? tmp/so_mine2.png
+?? tmp/so_ref2.png
