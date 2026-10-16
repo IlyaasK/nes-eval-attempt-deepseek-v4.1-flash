@@ -1265,6 +1265,14 @@ impl Ppu {
         let sp_enabled = self.mask & 0x10 != 0;
 
         // ------------------------------------------------ background pixel ---
+        // NOTE (unfixed): a $2005 X-scroll write made during vblank takes
+        // effect 2 frames later here than in the reference.  Repro:
+        //   oracle run tmp/fx.nes 24 --dump-frames R ; nesrun tmp/fx.nes 24 --out M
+        // Ref shifts row 0 at frame 10, we shift at frame 12; frames 12..23 are
+        // byte-identical.  Same mechanism as the games' residual 2-px row-0
+        // edges (43 px / 14 frames).  Suspects: the dot at which t's horizontal
+        // bits reach v / the shifter reload relative to the $2002 vblank flag.
+        // Both $2005 write handlers are correct (fine_x only from the 1st write).
         let mut bg_pixel = 0u8;
         let mut bg_pal = 0u8;
         if bg_enabled && (x >= 8 || self.mask & 0x02 != 0) {
