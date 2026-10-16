@@ -126,6 +126,22 @@ fn ppu_dot_late() -> bool {
     unsafe { PPU_DOT_LATE }
 }
 
+/// Extra dots added to the sprite fetch phase (0 or 1).  The documented
+/// sprite fetch runs at dots 257-320 with the attribute byte loaded on the
+/// second tick of the second garbage nametable fetch.
+static mut SPR_OFF: u16 = 0;
+#[cfg(feature = "trace")]
+fn spr_off() -> u16 {
+    unsafe {
+        if let Ok(v) = std::env::var("SPR_OFF") {
+            if let Ok(n) = v.parse::<u16>() { SPR_OFF = n; }
+        }
+        SPR_OFF
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn spr_off() -> u16 { unsafe { SPR_OFF } }
+
 /// Dot of scanline 261 on which the odd frame's clock is skipped.
 static mut ODD_SKIP_DOT: u16 = 340;
 /// Dot of scanline 261 at which the rendering-enabled state that decides the
@@ -891,7 +907,7 @@ impl Ppu {
             if rendering {
                 // ------------------------------------------------ fetches ---
                 let in_bg_fetch = dot <= 255 || (320..=335).contains(&dot);
-                let in_sprite_fetch = (256..=319).contains(&dot);
+                let in_sprite_fetch = ((256 + spr_off())..=(319 + spr_off())).contains(&dot);
                 if in_bg_fetch {
                     // The last fetch window of a visible scanline (dots 240-255)
                     // wraps into the next nametable; the reference keeps the
@@ -949,8 +965,9 @@ impl Ppu {
                         _ => {}
                     }
                 } else if in_sprite_fetch {
-                    let idx = ((dot - 256) / 8) as usize;
-                    match (dot - 256) & 7 {
+                    let d = dot - (256 + spr_off());
+                    let idx = (d / 8) as usize;
+                    match d & 7 {
                         0 | 1 => {
                             let a = 0x2000 | (self.v & 0x0FFF);
                             let _ = self.vram_read(a, mapper);
