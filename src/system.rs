@@ -984,6 +984,15 @@ impl System {
         for _ in 0..frame_extra_dots() {
             self.step();
         }
+        #[cfg(feature = "trace")]
+        {
+            if std::env::var("FRAME_TRACE").is_ok() {
+                let nz = self.ppu.fb.iter().filter(|&&v| v != 0).count();
+                eprintln!("FRAMEDUMP ppu_frame={} fb0={:04X} nonzero={} row0_0f={}",
+                    self.ppu.frame, self.ppu.fb[0], nz,
+                    self.ppu.fb[..256].iter().filter(|&&v| v == 0x0F).count());
+            }
+        }
     }
 
 
