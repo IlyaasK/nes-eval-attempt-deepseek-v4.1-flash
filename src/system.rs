@@ -107,6 +107,10 @@ static mut LP_HZ: f64 = 40000.0;
 /// into the audible band; averaging over a few CPU cycles band-limits it the
 /// way the reference's output stage does.
 static mut MIX_AVG: usize = 1;
+/// Anti-alias low-pass applied to the mixer output at the CPU rate, before the
+/// 44.1 kHz decimation.  Number of cascaded poles (0 = off) and cutoff.
+static mut AA_POLES: usize = 0;
+static mut AA_HZ: f64 = 30000.0;
 
 #[cfg(feature = "trace")]
 fn load_audio_env() {
@@ -125,6 +129,12 @@ fn load_audio_env() {
         }
         if let Ok(v) = std::env::var("A_MIX_AVG") {
             if let Ok(n) = v.parse::<usize>() { MIX_AVG = n.clamp(1, 16); }
+        }
+        if let Ok(v) = std::env::var("A_AA_POLES") {
+            if let Ok(n) = v.parse::<usize>() { AA_POLES = n.min(4); }
+        }
+        if let Ok(v) = std::env::var("A_AA_HZ") {
+            if let Ok(f) = v.parse::<f64>() { AA_HZ = f; }
         }
     }
 }
@@ -358,6 +368,7 @@ pub struct System {
     mix_sum: f64,
     mix_hist: [f64; 16],
     mix_idx: usize,
+    aa_y: [f64; 4],
     #[cfg(feature = "trace")]
     pub mix_dump: Vec<f32>,
     #[cfg(feature = "trace")]
@@ -417,6 +428,7 @@ impl System {
             mix_sum: 0.0,
             mix_hist: [0.0; 16],
             mix_idx: 0,
+            aa_y: [0.0; 4],
             #[cfg(feature = "trace")]
             mix_dump: Vec::new(),
             #[cfg(feature = "trace")]
@@ -987,7 +999,20 @@ impl System {
         self.mix_sum += raw - self.mix_hist[leaving];
         self.mix_hist[self.mix_idx] = raw;
         self.mix_idx = (self.mix_idx + 1) & 15;
-        let m = self.mix_sum / avg as f64;
+        let mut m = self.mix_sum / avg as f64;
+        // Anti-alias before decimation (the reference band-limits its output
+        // stage, which keeps fast noise from aliasing into the audible band).
+        let aa_poles = unsafe { AA_POLES };
+        if aa_poles > 0 {
+            let aa_hz = unsafe { AA_HZ };
+            let rc = 1.0 / (2.0 * core::f64::consts::PI * aa_hz);
+            let aadt = 1.0 / CPU_HZ;
+            let aa_a = aadt / (rc + aadt);
+            for st in 0..aa_poles {
+                m = self.aa_y[st] + aa_a * (m - self.aa_y[st]);
+                self.aa_y[st] = m;
+            }
+        }
         self.audio_acc += SAMPLE_RATE as f64 / CPU_HZ;
         if self.audio_acc >= 1.0 {
             self.audio_acc -= 1.0;
