@@ -34,12 +34,18 @@ back, and each is a distinct kind of failure:
 |---|---|---|
 | `instr-official` | 0.0000 | First difference at frame 15; 1,084 of 2,430 frames differ. blargg's official-opcode suite fails, so some instruction's flags or addressing must be wrong. Audio for the same ROM is 0.99999 — the emulator produces sound correctly, it just doesn't show the right verdict. |
 | `holy-mapperel-mmc1` (and the MMC3, UxROM and CNROM variants) | 0.0000 | First difference at frame 151, 119 of 270 frames. All four mapper report ROMs fail, pointing at cartridge-board behaviour (banking or mirroring reads) rather than at the CPU, PPU or APU. |
-| `nova-the-squirrel-gameplay`, `thwaite-gameplay` | 0.9835, 0.9894 | Near-misses, not breakage: 4,965 of 5,400 frames differ slightly in the first, 69 of 6,000 in the second. The other four homebrew games replay frame-exactly. |
+| `nova-the-squirrel-gameplay`, `thwaite-gameplay` | 0.9835, 0.9894 | Near-misses, not breakage: 4,965 of 5,400 frames differ slightly in the first, 69 of 6,000 in the second. The other four homebrew games score 0.9998 or better, with a handful of frames differing in each. |
 
-Replay scoring is the strongest section at 0.9955, which is the opposite
-shape from the hand-written `nes-core` baseline (0.4569 replay, 0.8300
-procedural): this emulator runs real games almost perfectly but fails test
-ROMs that probe specific hardware corners.
+Replay scoring is the strongest section at 0.9955: this emulator runs real
+games almost perfectly but fails test ROMs that probe specific hardware
+corners.
+
+One constant in `src/system.rs`, `FIRST_FRAME_SKIPS = true`, makes the first
+`emu_run_frame` call return without emulating, which is what the reference
+does and what NES Eval's v1.0 ABI doesn't say. It is worth 0.362 of the score:
+with it set to `false` the same code grades 0.5650. NES Eval's hand-written
+baseline loses the same 0.36 for the same reason. Details:
+[Did any model hack the grader?](https://ilya.as/nes-eval/blog/reward-hacking/)
 
 For scale, on the same grader: the reference scores 1.0000, GPT-6.1 Sol
 0.9860, `nes-core` 0.5811, Space Bunny Free 0.0594, and the Qwen3.8 27B run
