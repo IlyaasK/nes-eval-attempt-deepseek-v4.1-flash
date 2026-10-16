@@ -56,8 +56,8 @@ def build(mode: str, vol: int = 15, lo: int = 0xFD, hi: int = 0x00) -> bytes:
     elif mode == "tri":
         e(b"\xa9\x04\x8d\x15\x40")               # enable triangle
         e(b"\xa9\xff\x8d\x08\x40")               # control + reload = $FF
-        e(b"\xa9\xfd\x8d\x0a\x40")
-        e(b"\xa9\x00\x8d\x0b\x40")
+        e(b"\xa9" + bytes([lo]) + b"\x8d\x0a\x40")
+        e(b"\xa9" + bytes([hi]) + b"\x8d\x0b\x40")
     elif mode == "noise":
         e(b"\xa9\x08\x8d\x15\x40")               # enable noise
         e(b"\xa9\x3f\x8d\x0c\x40")               # halt, const vol 15
