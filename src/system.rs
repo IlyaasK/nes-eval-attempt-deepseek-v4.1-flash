@@ -11,13 +11,8 @@ pub const SAMPLE_RATE: u32 = 44100;
 /// Windowed-sinc low-pass (35 taps, 13 kHz, Blackman) applied to the output,
 /// matching the reference's band-limited resampling (17-sample group delay).
 const FIR_TAPS: usize = 35;
-const FIR_COEFFS: [f64; FIR_TAPS] = [
-    -0.0000000000, -0.0000582377, 0.0000971652, 0.0003321966, -0.0013859498, 0.0020410250, -0.0002454556,
-    -0.0049364911, 0.0103932113, -0.0088657946, -0.0054848168, 0.0282752741, -0.0409680922, 0.0191226842,
-    0.0492957274, -0.1486955687, 0.2382745806, 0.7256170843, 0.2382745806, -0.1486955687, 0.0492957274,
-    0.0191226842, -0.0409680922, 0.0282752741, -0.0054848168, -0.0088657946, 0.0103932113, -0.0049364911,
-    -0.0002454556, 0.0020410250, -0.0013859498, 0.0003321966, 0.0000971652, -0.0000582377, -0.0000000000,
-];
+// Coefficients are computed at start-up from A_FIR_TAPS / A_FIR_FC so the
+// output filter can be fitted against the reference (see init_audio).
 
 /// Output resampling mode: 0 = hold the chain output, 1 = windowed-sinc FIR,
 /// 2 = linear interpolation between output samples.
@@ -37,6 +32,46 @@ fn fir_mode() -> u32 {
 fn fir_mode() -> u32 {
     unsafe { FIR_MODE }
 }
+
+/// Start-up delay in samples (before the first emitted sample).
+static mut AUDIO_START_SAMPLES: f64 = 17.94;
+#[cfg(feature = "trace")]
+fn audio_start_samples() -> f64 {
+    unsafe {
+        if let Ok(v) = std::env::var("A_START_SAMPLES") {
+            if let Ok(n) = v.parse::<f64>() { AUDIO_START_SAMPLES = n; }
+        }
+        AUDIO_START_SAMPLES
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn audio_start_samples() -> f64 { unsafe { AUDIO_START_SAMPLES } }
+
+/// Output FIR length (odd, 3..35) and cutoff (fraction of the sample rate).
+static mut FIR_TAPS_CFG: usize = 35;
+static mut FIR_FC_CFG: f64 = 0.3628;
+#[cfg(feature = "trace")]
+fn fir_taps_cfg() -> usize {
+    unsafe {
+        if let Ok(v) = std::env::var("A_FIR_TAPS") {
+            if let Ok(n) = v.parse::<usize>() { FIR_TAPS_CFG = n; }
+        }
+        FIR_TAPS_CFG
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn fir_taps_cfg() -> usize { unsafe { FIR_TAPS_CFG } }
+#[cfg(feature = "trace")]
+fn fir_fc_cfg() -> f64 {
+    unsafe {
+        if let Ok(v) = std::env::var("A_FIR_FC") {
+            if let Ok(n) = v.parse::<f64>() { FIR_FC_CFG = n; }
+        }
+        FIR_FC_CFG
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn fir_fc_cfg() -> f64 { unsafe { FIR_FC_CFG } }
 
 /// How many extra chain evaluations to run before the first emitted sample.
 /// `AUDIO_START_DELAY` holds the first emitted sample back by about one FIR
@@ -332,6 +367,9 @@ pub struct System {
     hp2_y: f64,
     lp_y: f64,
     fir_hist: [f64; FIR_TAPS],
+    fir_coeffs: [f64; FIR_TAPS],
+    fir_taps: usize,
+    audio_start_delay: f64,
     audio_warm: bool,
 }
 
@@ -383,9 +421,13 @@ impl System {
             hp2_y: 0.0,
             lp_y: 0.0,
             fir_hist: [0.0; FIR_TAPS],
+            fir_coeffs: [0.0; FIR_TAPS],
+            fir_taps: 35,
+            audio_start_delay: 0.0,
             audio_warm: true,
         };
         load_audio_env();
+        s.init_audio();
         s.power_on();
         s
     }
@@ -419,7 +461,7 @@ impl System {
             self.len_dump = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
             self.p1_dump.clear();
         }
-        self.audio_acc = AUDIO_START_DELAY;
+        self.audio_acc = self.audio_start_delay;
         self.prev_y3 = 0.0;
         self.hp1_x = 0.0;
         self.hp1_y = 0.0;
@@ -892,6 +934,35 @@ impl System {
     // -------------------------------------------------------------- audio ---
 
     #[inline]
+    /// Build the output FIR (a Blackman-windowed sinc) and the corresponding
+    /// start-up delay from `A_FIR_TAPS` / `A_FIR_FC`.
+    fn init_audio(&mut self) {
+        let taps = fir_taps_cfg().clamp(3, FIR_TAPS) | 1;
+        self.fir_taps = taps;
+        let fc = fir_fc_cfg();
+        let m = (taps - 1) as f64 / 2.0;
+        let mut c = [0.0f64; FIR_TAPS];
+        let mut sum = 0.0;
+        for i in 0..taps {
+            let k = i as f64 - m;
+            // Blackman window over the 0-based index (like np.blackman).
+            let x = 2.0 * core::f64::consts::PI * i as f64 / (taps - 1) as f64;
+            let w = 0.42 - 0.5 * x.cos() + 0.08 * (2.0 * x).cos();
+            let s = if k == 0.0 { 1.0 } else { (2.0 * fc * core::f64::consts::PI * k).sin() / (2.0 * fc * core::f64::consts::PI * k) };
+            c[i] = 2.0 * fc * s * w;
+            sum += c[i];
+        }
+        if sum != 0.0 {
+            for v in c.iter_mut() { *v /= sum; }
+        }
+        self.fir_coeffs = c;
+        // The reference's frame starts ~one group delay earlier than its first
+        // emitted sample; keep the original constant (tuned for 35 taps) and
+        // let the tap count move the effective delay.
+        self.audio_start_delay = -audio_start_samples();
+        let _ = m;
+    }
+
     fn audio_tick(&mut self) {
         // The reference's first output samples are the DC-blocker transient of
         // the mixer's idle level, not filtered silence: its output FIR starts
@@ -972,8 +1043,11 @@ impl System {
             let mut acc = 0.0;
             match fir_mode() {
                 1 => {
-                    for i in 0..FIR_TAPS {
-                        acc += self.fir_hist[i] * FIR_COEFFS[i];
+                    // Coefficients are centred on the newest sample, so for
+                    // fewer taps than the history length use the newest slice.
+                    let off = FIR_TAPS - self.fir_taps;
+                    for i in 0..self.fir_taps {
+                        acc += self.fir_hist[off + i] * self.fir_coeffs[i];
                     }
                 }
                 2 => {
@@ -987,8 +1061,12 @@ impl System {
             self.prev_y3 = y3;
             let v = (acc * s_scale).clamp(-32768.0, 32767.0) as i16;
             #[cfg(feature = "trace")]
-            if std::env::var("MIXDUMP").is_ok() && self.out.len() < 10 {
-                eprintln!("smp {}: m={:.5} y1={:.5} y2={:.5} y3={:.5} v={}", self.out.len(), m, y1, y2, y3, v);
+            if std::env::var("MIXDUMP").is_ok() {
+                let n = self.out.len();
+                if n < 10 || (n >= 1400 && n < 1412) {
+                    eprintln!("smp {}: m={:.5} y1={:.5} y2={:.5} y3={:.5} v={} p1={} mix={:.5}", n, m, y1, y2, y3, v,
+                        self.apu.channel_dac(0), self.apu.mix());
+                }
             }
             self.out.push(v);
         }

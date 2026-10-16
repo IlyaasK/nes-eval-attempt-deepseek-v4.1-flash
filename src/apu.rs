@@ -402,7 +402,11 @@ impl Noise {
         }
         if self.timer_counter == 0 {
             self.timer_counter = self.period();
-            let tap = if self.mode { 6 } else { 1 };
+            let tap = match noise_tap_mode() {
+                1 => 1,
+                6 => 6,
+                _ => if self.mode { 6 } else { 1 },
+            };
             let feedback = (self.shift & 1) ^ ((self.shift >> tap) & 1);
             self.shift = ((self.shift >> 1) | (feedback << 14)) & 0x7FFF;
         }
@@ -575,6 +579,21 @@ fn noise_weight() -> usize {
 fn noise_weight() -> usize {
     unsafe { NOISE_WEIGHT }
 }
+
+/// Fixes the noise feedback tap (0 = follow the mode bit, 1 or 6 = always that
+/// bit).  Diagnostic knob for matching the reference's LFSR sequence.
+static mut NOISE_TAP: u8 = 0;
+#[cfg(feature = "trace")]
+fn noise_tap_mode() -> u8 {
+    unsafe {
+        if let Ok(v) = std::env::var("NOISE_TAP") {
+            if let Ok(n) = v.parse::<u8>() { NOISE_TAP = n; }
+        }
+        NOISE_TAP
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn noise_tap_mode() -> u8 { unsafe { NOISE_TAP } }
 
 static mut MIX_DC: f32 = 0.25;
 
