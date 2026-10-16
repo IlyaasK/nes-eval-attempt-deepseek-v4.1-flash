@@ -497,6 +497,13 @@ impl Ppu {
             self.vram[idx & 4095] = val;
         } else {
             let idx = Self::pal_index(a);
+            #[cfg(feature = "trace")]
+            {
+                if std::env::var("TRACE_PALW").is_ok() {
+                    eprintln!("PALW f={} sl={} dot={} addr={:04X} -> idx={} val={:02X} delay={}",
+                        self.frame, self.scanline, self.dot, a, idx, val, pal_delay());
+                }
+            }
             // The write reaches palette RAM two PPU dots later.
             let n = self.pending_pal_n as usize;
             if n < self.pending_pal.len() {
