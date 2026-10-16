@@ -771,6 +771,17 @@ impl System {
 
     #[inline]
     fn bus_read(&mut self, addr: u16) -> u8 {
+        #[cfg(feature = "trace")]
+        if let Ok(v) = std::env::var("RDWATCH") {
+            if let Some((a, b)) = v.split_once('-') {
+                let lo = u16::from_str_radix(a, 16).unwrap_or(0);
+                let hi = u16::from_str_radix(b, 16).unwrap_or(0);
+                if addr >= lo && addr <= hi {
+                    eprintln!("RDW {:04X} pc={:04X} cyc={} ppu_f={} sl={} dot={}",
+                        addr, self.cpu.pc, self.cycles, self.ppu.frame, self.ppu.scanline, self.ppu.dot);
+                }
+            }
+        }
         match addr {
             0x0000..=0x1FFF => self.ram[(addr & 0x07FF) as usize],
             0x2000..=0x3FFF => {
