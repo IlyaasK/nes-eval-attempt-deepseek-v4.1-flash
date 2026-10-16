@@ -909,6 +909,15 @@ impl Ppu {
             }
         }
 
+        #[cfg(feature = "trace")]
+        {
+            if std::env::var("FBWATCH").is_ok() && (sl >= 255 || (sl == 0 && dot < 3)) {
+                let f = std::env::var("FBWATCH").unwrap();
+                if f == format!("{}", self.frame) {
+                    eprintln!("FBW f={} sl={} fb01={:04X},{:04X}", self.frame, sl, self.fb[0], self.fb[1]);
+                }
+            }
+        }
         if sl == 241 && dot == vbl_set_dot() {
             if !self.vbl_suppress {
                 self.status |= 0x80;
@@ -1127,8 +1136,8 @@ impl Ppu {
                     if std::env::var("PXL_TRACE").is_ok() {
                         let prev = self.fb[(sl as usize) * 256 + x];
                         if prev != v || x == 0 {
-                            eprintln!("P f={} sl={} dot={} x={} {:04X}->{:04X} off v={:04X} t={:04X} mask={:02X}",
-                                self.frame, sl, dot, x, prev, v, self.v, self.t, self.mask);
+                            eprintln!("P f={} sl={} dot={} x={} {:04X}->{:04X} off v={:04X} t={:04X} mask={:02X} rd={}",
+                                self.frame, sl, dot, x, prev, v, self.v, self.t, self.mask, self.rendering_enabled());
                         }
                     }
                     self.fb[(sl as usize) * 256 + x] = v;
@@ -1406,7 +1415,7 @@ impl Ppu {
             if std::env::var("PXL_TRACE2").is_ok() {
                 let nv = (emph << 6) | colour;
                 let prev = self.fb[sl * 256 + x as usize];
-                if prev != nv {
+                if prev != nv || (sl == 0 && x < 3) {
                     eprintln!("R f={} sl={} dot={} x={} {:04X}->{:04X} mask={:02X} bg={} sp={}",
                         self.frame, sl, self.dot, x, prev, nv, self.mask, bg_pixel, sp_pixel);
                 }
