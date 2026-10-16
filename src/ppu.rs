@@ -730,6 +730,13 @@ impl Ppu {
     }
 
     pub fn write_register(&mut self, addr: u16, val: u8, mapper: &mut dyn Mapper, warmup: bool) {
+        #[cfg(feature = "trace")]
+        if !warmup && std::env::var("PPU_WLOG").is_ok() && (addr & 7) <= 7 {
+            eprintln!(
+                "W {:7} f={} sl={:3} dot={:3} reg{}={:02X} v={:04X} t={:04X}",
+                self.total_dots, self.frame, self.scanline, self.dot, addr & 7, val, self.v, self.t
+            );
+        }
         // Any write to $2000-$3FFF loads the PPU's decay register with the
         // whole byte: reads of $2000-$2006 return it, $2002 its low 5 bits.
         self.open_bus = val;
@@ -1044,7 +1051,16 @@ impl Ppu {
                     let x = (dot - 1) as usize;
                     let colour = self.backdrop_colour();
                     let emph = ((self.mask >> 5) & 7) as u16;
-                    self.fb[(sl as usize) * 256 + x] = (emph << 6) | colour;
+                    let v = (emph << 6) | colour;
+                    #[cfg(feature = "trace")]
+                    if std::env::var("PXL_TRACE").is_ok() {
+                        let prev = self.fb[(sl as usize) * 256 + x];
+                        if prev != v || x == 0 {
+                            eprintln!("P f={} sl={} dot={} x={} {:04X}->{:04X} off v={:04X} t={:04X} mask={:02X}",
+                                self.frame, sl, dot, x, prev, v, self.v, self.t, self.mask);
+                        }
+                    }
+                    self.fb[(sl as usize) * 256 + x] = v;
                 }
             }
         }
@@ -1305,6 +1321,15 @@ impl Ppu {
         }
         let emph = ((self.mask >> 5) & 7) as u16;
         let sl = self.scanline as usize;
+        #[cfg(feature = "trace")]
+        if std::env::var("PXL_TRACE").is_ok() {
+            let v = (emph << 6) | colour;
+            let prev = self.fb[sl * 256 + x as usize];
+            if prev != v || x == 0 {
+                eprintln!("P f={} sl={} dot={} x={} {:04X}->{:04X} REND v={:04X} t={:04X} mask={:02X}",
+                    self.frame, sl, self.dot, x, prev, v, self.v, self.t, self.mask);
+            }
+        }
         self.fb[sl * 256 + x as usize] = (emph << 6) | colour;
         self.shift_registers();
     }
@@ -1409,16 +1434,6 @@ impl Ppu {
     }
 
     /// Advance to the next dot; handles scanline/frame boundaries.
-    /// Number of dots the next frame will take: 89342, or 89341 when the
-    /// odd-frame pre-render dot gets skipped (rendering enabled).
-    pub fn expected_frame_len(&self) -> u64 {
-        if self.odd_frame && self.render_at_skip {
-            89341
-        } else {
-            89342
-        }
-    }
-
     pub fn advance(&mut self) {
         #[cfg(feature = "trace")]
         {

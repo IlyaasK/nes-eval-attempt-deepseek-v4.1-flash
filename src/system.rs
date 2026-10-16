@@ -142,16 +142,6 @@ fn first_frame_skips() -> bool {
     unsafe { FIRST_FRAME_SKIPS }
 }
 
-/// Whether to defer an instruction that would cross the frame boundary.
-#[cfg(feature = "trace")]
-fn frame_defer_enabled() -> bool {
-    !matches!(std::env::var("FRAME_DEFER").as_deref(), Ok("0"))
-}
-#[cfg(not(feature = "trace"))]
-fn frame_defer_enabled() -> bool {
-    true
-}
-
 /// PPU dots to keep running after the frame boundary before returning.
 static mut FRAME_EXTRA_DOTS: usize = 0;
 
@@ -225,10 +215,6 @@ pub struct System {
     pub ram: [u8; 2048],
 
     pub keys: [u8; 2],
-    /// Absolute PPU dot count at which the next frame wrap is expected.
-    pub wrap_target: u64,
-    /// Learned instruction length in CPU cycles, per opcode (0 = unknown).
-    pub defer_len: [u8; 256],
     pub shift: [u8; 2],
     pub strobe: bool,
 
@@ -295,8 +281,6 @@ impl System {
             mapper,
             ram: [0; 2048],
             keys: [0; 2],
-            wrap_target: u64::MAX,
-            defer_len: [0; 256],
             shift: [0; 2],
             strobe: false,
             cycles: 0,
@@ -349,8 +333,6 @@ impl System {
         self.apu.reset();
         self.ram = [0; 2048];
         self.keys = [0; 2];
-        self.wrap_target = u64::MAX;
-        self.defer_len = [0; 256];
         self.shift = [0; 2];
         self.strobe = false;
         self.cycles = 0;
@@ -385,6 +367,12 @@ impl System {
     }
 
     // ------------------------------------------------------------ clocking ---
+
+    /// Advance the PPU by one dot without touching the CPU or APU.
+    pub(crate) fn ppu_only_dot(&mut self) {
+        let System { ppu, mapper, .. } = self;
+        ppu.process_dot(mapper.as_mut());
+    }
 
     #[inline]
     fn clock_dot(&mut self, access: Option<Access>) -> u8 {
@@ -803,55 +791,18 @@ impl System {
         }
         self.ppu.frame_complete = false;
         let mut guard: u64 = 0;
-        let defer = frame_defer_enabled();
         while !self.ppu.frame_complete {
-            if defer {
-                // Do not start an instruction the PPU cannot finish inside this
-                // frame: defer it to the next call.  That keeps the frame
-                // boundary within a couple of dots of the reference's
-                // dot-precise boundary instead of up to 7 cycles late.
-                let op = self.peek8(self.cpu.pc);
-                let len = self.defer_len[op as usize] as u64;
-                if len > 0 && self.ppu.total_dots.saturating_add(3 * len) > self.wrap_target {
-                    break;
-                }
-                self.step();
-                let used = self.cpu.instr_cycles as u64;
-                if used > 0 && used < 64 {
-                    self.defer_len[op as usize] = used as u8;
-                }
-            } else {
-                self.step();
-            }
+            self.step();
             guard += 1;
             if guard > 40_000_000 {
                 break;
             }
-        }
-        if self.ppu.frame_complete {
-            self.wrap_target = self.ppu.total_dots + self.ppu.expected_frame_len();
         }
         for _ in 0..frame_extra_dots() {
             self.step();
         }
     }
 
-    /// Side-effect-free read of a byte for instruction-length prediction.
-    #[inline]
-    fn peek8(&mut self, addr: u16) -> u8 {
-        match addr {
-            0x0000..=0x1FFF => self.ram[(addr & 0x07FF) as usize],
-            0x6000..=0x7FFF => {
-                let r = self.mapper.prg_ram();
-                if r.is_empty() {
-                    0
-                } else {
-                    r[(addr - 0x6000) as usize % r.len()]
-                }
-            }
-            _ => self.mapper.prg_read(addr),
-        }
-    }
 
 
     // -------------------------------------------------------------- audio ---

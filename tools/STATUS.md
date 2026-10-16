@@ -456,3 +456,26 @@ of the instruction that crossed the wrap).  Options:
   stable CPU/PPU phase that NMI-synced raster code depends on.
 Only a CPU that can be suspended mid-instruction (cycle-resumable microcode)
 can have both; the CPU here is a straight-line Rust function.
+
+## The 18-dot raster-split difference: not a register-write delay
+* The game's message box top bar appears 18 px further right in the reference
+  (x=8 vs x=26 on the same scanline), i.e. the mid-scanline scroll write takes
+  effect ~18 dots later in the reference.
+* REG_DELAY sweep on that case: totdiff drops 1 px per dot (79 at 0 ... 72 at
+  8), so the knob *can* paper over it - but REG_DELAY=3 destroys
+  ppu_vbl_nmi__07 (298/300 -> 174/300), which pins the register-write timing.
+  The reference has no register write delay; **REG_DELAY must stay 0**.
+* An instruction-defer experiment (never start an instruction the PPU cannot
+  finish this frame, so the boundary lands <=2 dots early instead of <=21
+  late) changed *nothing* measurable (rfK 599/600 and the rp_a0 case 298/300
+  both before and after), confirming the frame-boundary overshoot does not
+  influence in-frame raster timing.  Removed.
+
+## Session conclusion
+No net source change: every experiment (carry boundary, power-on dot,
+instruction defer, REG_DELAY) was measured and reverted, with the numbers
+recorded above.  The emulator's remaining deviations from the reference are
+(a) the <=21-dot frame-boundary overshoot (only visible as a 2-pixel row-0
+artifact on palette-change frames), (b) cpu_interrupts_v2__3 rows 11-12 and
+mmc3_test_2__4's sub-instruction IRQ check, and (c) one 18-dot mid-scanline
+scroll difference in robotfindskitten's message box animation.

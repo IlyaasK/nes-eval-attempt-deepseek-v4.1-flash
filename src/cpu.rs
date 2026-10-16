@@ -6,6 +6,25 @@
 
 use crate::system::System;
 
+/// Extra PPU-only dots applied at the end of the reset sequence; shifts the
+/// CPU/PPU phase without touching the APU.  Diagnostic knob (trace builds).
+static mut POWER_DOTS: usize = 0;
+#[cfg(feature = "trace")]
+fn power_dots() -> usize {
+    unsafe {
+        if let Ok(v) = std::env::var("POWER_DOTS") {
+            if let Ok(n) = v.parse::<usize>() {
+                POWER_DOTS = n;
+            }
+        }
+        POWER_DOTS
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn power_dots() -> usize {
+    unsafe { POWER_DOTS }
+}
+
 pub const FLAG_C: u8 = 0x01;
 pub const FLAG_Z: u8 = 0x02;
 pub const FLAG_I: u8 = 0x04;
@@ -451,6 +470,9 @@ impl System {
         // power-on alignment (PPU at scanline 0, dot 25 at the first opcode
         // fetch, counting the PPU's first dot as dot 1).
         self.idle_read(self.cpu.pc);
+        for _ in 0..power_dots() {
+            self.ppu_only_dot();
+        }
     }
 
     // ------------------------------------------------------------- stepping ---
