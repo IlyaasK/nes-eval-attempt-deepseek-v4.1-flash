@@ -6,12 +6,15 @@
 
 use crate::system::System;
 
-/// PPU-only dots clocked at the end of the reset sequence.  The ABI fixes the
-/// power-on alignment exactly: at the first opcode fetch the PPU is at
-/// scanline 0, dot 25, having clocked from dot 0.  Eight CPU cycles clock 24
-/// dots, so exactly one extra dot is needed.  Verified to the dot against the
-/// reference with a free-running raster-band probe.
-static mut POWER_ALIGN_DOTS: usize = 1;
+/// PPU-only dots clocked at the end of the reset sequence.  The ABI says the
+/// PPU is at "scanline 0, dot 25" at the first opcode fetch after clocking from
+/// dot 0; eight CPU cycles clock 24 dots, which is that same state if the first
+/// dot is counted as dot 1.  One extra dot was tried and *rejected*: it moves
+/// ppu_vbl_nmi 02/03/04/06/07/08/09/10 from 298,298,299,298,298,298,299,298 to
+/// 297,297,294,297,297,297,294,297, apu_test 2/4/5/8 from 299,299,299,298 to
+/// 294,298,295,295, cpu_interrupts_v2__1 299 -> 295 and cpu_reset 299 -> 298.
+/// The knob stays for diagnosis; default 0 matches the reference.
+static mut POWER_ALIGN_DOTS: usize = 0;
 #[cfg(feature = "trace")]
 fn power_align_dots() -> usize {
     unsafe {

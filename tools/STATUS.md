@@ -479,3 +479,77 @@ recorded above.  The emulator's remaining deviations from the reference are
 artifact on palette-change frames), (b) cpu_interrupts_v2__3 rows 11-12 and
 mmc3_test_2__4's sub-instruction IRQ check, and (c) one 18-dot mid-scanline
 scroll difference in robotfindskitten's message box animation.
+
+# Session: NMI acceptance model + power-on CPU/PPU alignment
+
+## Power-on alignment: checked with an extra dot, REJECTED by the corpus
+The ABI says "at that same moment the PPU is at scanline 0, dot 25 (the reset
+sequence has run with the PPU clocking from scanline 0, dot 0)".  Eight CPU
+cycles clock 24 dots; clocking one further PPU-only dot makes a free-running
+raster-band probe line up with the reference to the dot (band edge 105 in both
+instead of 104), which looks like a confirmation.
+
+But the effect on the ROM corpus is uniformly negative: with the extra dot,
+ppu_vbl_nmi 02/03/04/06/07/08/09/10 go 298,298,299,298,298,298,299,298 ->
+297,297,294,297,297,297,294,297; apu_test 2/4/5/8 go 299,299,299,298 ->
+294,298,295,295; cpu_interrupts_v2__1 299 -> 295; cpu_reset 299 -> 298.  Two
+extra dots give yet another (different) misalignment.  With no extra dot every
+one of those ROMs is back to 298-299/300.
+
+So the reference's alignment is the plain 8-cycle one and the ABI's "dot 25"
+is consistent with counting the first PPU dot as 1.  `POWER_ALIGN_DOTS`
+default is 0; the 1-dot difference seen by the free-running probe must come
+from a one-dot register-effect latency difference in that probe's path, not
+from the CPU/PPU phase.
+
+NOTE: the earlier `POWER_DOTS` knob was inert -- `ppu_only_dot` called
+`process_dot` without `advance()`, so it never moved the dot counter.  That is
+why previous phase experiments showed "no effect".
+
+## Verified: NMI acceptance timing model
+Built a probe with loops of length 5/7/9/11 cycles whose iteration count at the
+NMI is painted through the backdrop-palette hack, so the painted value gives the
+acceptance to the cycle (mod 64 * loop length).  Result over 24 frames x 4
+lengths:
+* immediate pending (no extra delay): **identical to the reference** in all 96
+  comparisons;
+* pending delayed by 1/2/3 cycles: mine is one loop iteration late on ~1/3 of
+  frames for L=5 and on some frames for L=7/9/11.
+So the immediate-pending model is the correct one and was kept (default
+NMI_DELAY=0; the knob remains for diagnosis).
+
+## Investigated, not explained: robotfindskitten message-box raster offset
+With A held from frame 0, rfK draws its message box with a "palette stream"
+while rendering is off (the backdrop shows palette[$3F00|v&0x1F] as v walks
+through palette RAM).  At frame 12 my bands sit 18-19 dots earlier than the
+reference's (identical run lengths, so it is a pure shift).  A one-cycle NMI
+delay "fixed" it (7 px vs 79) but the loop probe above proves that model wrong,
+i.e. it was masking a different bug; reverted.  The game's intro is
+*free-running* (no NMI/$2002 frame sync: $885C's $E0 loop never executes in
+this phase), so the offset is a constant ~6 CPU cycles of timeline difference,
+not a phase difference (the phase probe matches to the dot).  Candidate causes
+ruled out by sweep (no effect on rp_a0): OAM DMA alignment mode (0-3), PPU
+warm-up length (29650/29658/29660/29700), first-frame skip, frame extra dots,
+palette write delay, NMI sample phase (0/1/2), odd-frame skip dot.
+
+## Remaining differences in the real games
+All four games are now pixel-perfect at 1000 frames except a 1-10 pixel
+artifact in **row 0 only**, on frames where the palette changes: the frame
+boundary ends up to 21 dots after the PPU wrap (instruction granularity), so
+the first pixels of scanline 0 are re-rendered before `emu_run_frame` returns,
+one dot of the boundary is in the reference's next call.  Removing it needs a
+dot-precise frame boundary, i.e. a CPU that can be suspended mid-instruction.
+
+## Frame-stop-zone experiment (rejected)
+Idea: end `emu_run_frame` *before* the PPU wrap (stop when the PPU is in the last
+N dots of the pre-render line) so that no pixel of the next frame's scanline 0
+is rendered inside the call, which should remove the row-0 artifact.
+
+Measured (rfK, 600 frames, and the A-held replay):
+  zone=0  : 599/600 totdiff 2      | replay 298/300 totdiff 79
+  zone=8  : 586/600 totdiff 244905 | replay 282/300
+  zone>=16: 584/600 totdiff 251067 | replay 276/300
+The first diverging frames (5, 6) differ over the whole screen, so ending the
+call early desynchronises the game's rendering rather than just moving the
+boundary.  Reverted; `emu_run_frame` still ends at the first instruction
+boundary after the wrap.
