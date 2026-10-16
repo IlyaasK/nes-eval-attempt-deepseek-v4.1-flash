@@ -603,6 +603,19 @@ static mut MIX_DC: f32 = 0.25;
 /// larger values approach a linear mixer (the reference's sums are linear).
 static mut MIX_LIN: f32 = 1.0;
 
+static mut TRI_WEIGHT: usize = 12;
+#[cfg(feature = "trace")]
+fn tri_weight() -> usize {
+    unsafe {
+        if let Ok(v) = std::env::var("A_TRI_WEIGHT") {
+            if let Ok(n) = v.parse::<usize>() { TRI_WEIGHT = n; }
+        }
+        TRI_WEIGHT
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn tri_weight() -> usize { unsafe { TRI_WEIGHT } }
+
 #[cfg(feature = "trace")]
 fn mix_lin() -> f32 {
     unsafe {
@@ -1005,7 +1018,7 @@ impl Apu {
         // Weights (triangle 12, noise 5.6, DMC 2.2) are calibrated against the
         // reference's measured levels for each channel (tools: mixcurve.py,
         // mixcurve2.py, dmccurve.py); the table's constant uses the same scale.
-        let tnd = 12 * self.triangle.output() as usize
+        let tnd = tri_weight() * self.triangle.output() as usize
             + (28 * noise_weight() / 7 * self.noise.output() as usize) / 5
             + (22 * self.dmc.output_level as usize) / 10;
         // The NES DACs are unipolar, so the mixer has a constant idle offset.
