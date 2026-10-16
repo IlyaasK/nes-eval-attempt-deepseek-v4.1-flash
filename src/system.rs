@@ -988,8 +988,14 @@ impl System {
         {
             if std::env::var("FRAME_TRACE").is_ok() {
                 let nz = self.ppu.fb.iter().filter(|&&v| v != 0).count();
-                eprintln!("FRAMEDUMP ppu_frame={} fb0={:04X} nonzero={} row0_0f={}",
-                    self.ppu.frame, self.ppu.fb[0], nz,
+                let calls = {
+                    static mut CALLS: u64 = 0;
+                    let c = unsafe { CALLS } + 1;
+                    unsafe { CALLS = c };
+                    c
+                };
+                eprintln!("FRAMEDUMP call={} ppu_frame={} fb0={:04X} nonzero={} row0_0f={}",
+                    calls, self.ppu.frame, self.ppu.fb[0], nz,
                     self.ppu.fb[..256].iter().filter(|&&v| v == 0x0F).count());
             }
         }
