@@ -858,6 +858,10 @@ impl Ppu {
                 }
             }
             7 => {
+                #[cfg(feature = "trace")]
+                if std::env::var("TRACE_VRAMW").is_ok() {
+                    eprintln!("VRAMW f={} sl={} dot={} addr={:04X} val={:02X}", self.frame, self.scanline, self.dot, self.v & 0x3FFF, val);
+                }
                 self.open_bus = val;
                 let addr = self.v & 0x3FFF;
                 self.vram_write(addr, val, mapper);

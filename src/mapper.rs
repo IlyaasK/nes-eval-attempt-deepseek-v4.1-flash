@@ -331,7 +331,10 @@ impl Uxrom {
             ram: PrgRam::new(cart.prg_ram_size),
             mirroring: mirror_from_header(cart.mirroring),
             bank: 0,
-            bus_conflicts: true,
+            // iNES mapper 2 is conventionally implemented as a full 8-bit bank
+            // select register without AND-type bus conflicts (UxROM.md), which
+            // is what the reference does.
+            bus_conflicts: false,
         }
     }
 }
@@ -399,6 +402,8 @@ impl Cnrom {
             ram: PrgRam::new(cart.prg_ram_size),
             mirroring: mirror_from_header(cart.mirroring),
             bank: 0,
+            // The original CNROM board is subject to AND-type bus conflicts
+            // (CNROM.md); iNES mapper 3 files in the wild expect them.
             bus_conflicts: true,
         }
     }
