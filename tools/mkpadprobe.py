@@ -67,17 +67,10 @@ def build() -> bytes:
     e(b"\x29\x01")
     e(b"\x8d\x07\x20")                   # sta $2007 (tile 0 or 1)
     e(b"\xca"); br(0xD0, "bits")
-    e(b"\x4c" + struct.pack("<H", ORIGIN + 0))
+    e(b"\x4c" + struct.pack("<H", ORIGIN + a.labels["frame"]))
     a.label("spin"); e(b"\x4c" + struct.pack("<H", ORIGIN + len(a.code)))
-    # patch the frame jump to `frame`
     a.resolve()
-    # fix the 'jmp frame' operand (emitted with a placeholder 0)
     code = a.code
-    idx = code.find(b"\x4c\x00\x00")
-    if idx >= 0:
-        tgt = ORIGIN + a.labels["frame"]
-        code[idx + 1] = tgt & 0xFF
-        code[idx + 2] = (tgt >> 8) & 0xFF
     prg = bytearray(0x4000)
     prg[0x2000:0x2000 + len(code)] = code
     for v in (0x3FFA, 0x3FFC, 0x3FFE):

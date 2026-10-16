@@ -33,21 +33,6 @@ fn fir_mode() -> u32 {
     unsafe { FIR_MODE }
 }
 
-/// Integrate over a fixed number of CPU cycles instead of the full sample
-/// period (0 = full period).
-static mut INT_WIDTH: usize = 0;
-#[cfg(feature = "trace")]
-fn int_width() -> usize {
-    unsafe {
-        if let Ok(v) = std::env::var("A_INT_WIDTH") {
-            if let Ok(n) = v.parse::<usize>() { INT_WIDTH = n; }
-        }
-        INT_WIDTH
-    }
-}
-#[cfg(not(feature = "trace"))]
-fn int_width() -> usize { unsafe { INT_WIDTH } }
-
 /// The integrate-and-dump window has a group delay of half a sample period;
 /// emitting half a sample later cancels it (calibrated against the reference).
 static mut AUDIO_PHASE: f64 = -0.6;
@@ -1092,15 +1077,6 @@ impl System {
                 self.aa_y[st] = m;
             }
         }
-        let iw = int_width();
-        if iw > 0 {
-            let cap = iw.min(64);
-            let leaving = (self.mix_idx + 64 - cap) & 63;
-            self.mix_sum += m - self.mix_hist[leaving];
-            self.mix_hist[self.mix_idx] = m;
-            self.mix_idx = (self.mix_idx + 1) & 63;
-            if self.mix_idx % 16 == 0 { /* keep mix_n unused */ }
-        }
         self.mix_acc += m;
         self.mix_n += 1;
         self.audio_acc += SAMPLE_RATE as f64 / CPU_HZ;
@@ -1112,12 +1088,7 @@ impl System {
                     self.sample_at.push(self.cycles);
                 }
             }
-            let m = if iw > 0 {
-                let cap = iw.min(64);
-                self.mix_sum / cap as f64
-            } else {
-                self.mix_acc / self.mix_n as f64
-            };
+            let m = self.mix_acc / self.mix_n as f64;
             self.mix_acc = 0.0;
             self.mix_n = 0;
             #[allow(unused_unsafe)]
