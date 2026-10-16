@@ -337,6 +337,10 @@ pub struct Ppu {
     ev_n: u8,
     ev_m: u8,
     ev_mode: EvMode,
+    /// Last byte read from primary OAM during sprite evaluation, and last byte
+    /// written into (or read from) secondary OAM.
+    ev_read_val: u8,
+    ev_write_val: u8,
 
     /// Set when a $2002 read happened exactly one dot before the VBL set.
     vbl_suppress: bool,
@@ -411,6 +415,8 @@ impl Ppu {
             ev_n: 0,
             ev_m: 0,
             ev_mode: EvMode::CheckY,
+            ev_read_val: 0xFF,
+            ev_write_val: 0xFF,
             vbl_suppress: false,
             nmi_suppress: false,
             oam_addr_write_during_render: false,
@@ -665,9 +671,8 @@ impl Ppu {
             4 => {
                 if self.rendering_enabled()
                     && (self.scanline <= 239 || self.scanline == 261)
-                    && self.dot < 64
                 {
-                    return 0xFF;
+                    return self.oam_peek_during_rendering();
                 }
                 let mut v = self.oam[self.oam_addr as usize];
                 // The three unimplemented bits of a sprite's attribute byte
@@ -812,14 +817,17 @@ impl Ppu {
                 self.oam_addr = val;
             }
             4 => {
-                // Writes to OAMDATA during rendering do not modify OAM (only
-                // the OAM address is bumped).
+                // Writes to OAMDATA during rendering do not modify OAM.  The
+                // address increment is glitchy: only the high 6 bits (the
+                // sprite index n) are bumped, so the low bits (m) are kept.
                 let in_render = self.rendering_enabled()
                     && (self.scanline <= 239 || self.scanline == 261);
                 if !in_render {
                     self.oam[self.oam_addr as usize] = val;
+                    self.oam_addr = self.oam_addr.wrapping_add(1);
+                } else {
+                    self.oam_addr = self.oam_addr.wrapping_add(4);
                 }
-                self.oam_addr = self.oam_addr.wrapping_add(1);
             }
             5 => {
                 if warmup {
@@ -1055,7 +1063,7 @@ impl Ppu {
                 }
 
                 // -------------------------------------------- sprite eval ----
-                if sl <= 239 && (64..=255).contains(&dot) && dot & 1 == 0 {
+                if sl <= 239 && (65..=255).contains(&dot) && dot & 1 == 1 {
                     self.evaluate_sprite_step();
                 }
                 if (sl <= 239 || sl == 261) && dot == 0 {
@@ -1064,10 +1072,15 @@ impl Ppu {
                     self.ev_m = 0;
                     self.ev_mode = EvMode::CheckY;
                 }
-                if (sl <= 239) && (0..=63).contains(&dot) && dot & 1 == 1 {
-                    let base = ((dot - 1) as usize) & 0x1F;
+                if (sl <= 239) && (2..=64).contains(&dot) && dot & 1 == 0 {
+                    let base = ((dot - 2) as usize) & 0x1F;
                     self.sec_oam[base] = 0xFF;
                     self.sec_oam[(base + 1) & 0x1F] = 0xFF;
+                }
+
+                // OAMADDR is forced to 0 during the sprite tile loading ticks.
+                if (sl <= 239 || sl == 261) && (257..=320).contains(&dot) {
+                    self.oam_addr = 0;
                 }
 
                 // ------------------------------------------- vertical bits ---
@@ -1404,6 +1417,12 @@ impl Ppu {
         match self.ev_mode {
             EvMode::CheckY => {
                 let y = self.oam[(self.ev_n as usize) * 4];
+                self.ev_read_val = y;
+                self.ev_write_val = if self.sprite_count < 8 {
+                    self.sec_oam[(self.sprite_count as usize) * 4]
+                } else {
+                    self.sec_oam[0]
+                };
                 if self.ev_in_range(y) {
                     if self.sprite_count < 8 {
                         self.sec_oam[(self.sprite_count as usize) * 4] = y;
@@ -1425,6 +1444,15 @@ impl Ppu {
             }
             EvMode::CopyByte => {
                 let v = self.oam[(self.ev_n as usize) * 4 + self.ev_m as usize];
+                self.ev_read_val = v;
+                // With secondary OAM full the write cycle reads secondary OAM
+                // instead; that value is the Y coordinate of the first sprite
+                // copied in (documented cause of the overflow quirk).
+                self.ev_write_val = if self.sprite_count < 8 {
+                    v
+                } else {
+                    self.sec_oam[0]
+                };
                 self.sec_oam[(self.sprite_count as usize) * 4 + self.ev_m as usize] = v;
                 self.ev_m += 1;
                 if self.ev_m >= 4 {
@@ -1443,6 +1471,8 @@ impl Ppu {
             EvMode::OverflowScan => {
                 let addr = (self.ev_n as usize * 4 + self.ev_m as usize) & 0xFF;
                 let v = self.oam[addr];
+                self.ev_read_val = v;
+                self.ev_write_val = self.sec_oam[0];
                 if self.ev_in_range(v) {
                     #[cfg(feature = "trace")]
                     {
@@ -1451,9 +1481,15 @@ impl Ppu {
                         }
                     }
                     self.status |= 0x20;
+                    // Read the next three OAM entries, incrementing m after each
+                    // byte and n when m overflows; if m lands on 3, n is
+                    // incremented once more (documented evaluation quirk).
                     let m = self.ev_m as usize + 3;
                     self.ev_n = self.ev_n.wrapping_add((m / 4) as u8);
                     self.ev_m = (m % 4) as u8;
+                    if self.ev_m == 3 {
+                        self.ev_n = self.ev_n.wrapping_add(1);
+                    }
                 } else {
                     self.ev_n = self.ev_n.wrapping_add(1);
                     // m is a two-bit counter: it wraps within the sprite entry
@@ -1465,6 +1501,38 @@ impl Ppu {
                 }
             }
             EvMode::Done => {}
+        }
+    }
+
+    /// Value returned by a $2004 read while the PPU is rendering: the byte the
+    /// PPU's own OAM access is currently using (sprite evaluation, sprite
+    /// fetches, or the secondary-OAM clear).
+    fn oam_peek_during_rendering(&self) -> u8 {
+        let dot = self.dot;
+        if dot <= 64 {
+            // Secondary OAM clear forces $FF onto the OAM data bus.
+            return 0xFF;
+        }
+        if dot <= 256 {
+            // Sprite evaluation: odd dots read primary OAM, even dots write
+            // (or, once secondary OAM is full, read) secondary OAM.
+            if dot & 1 == 1 {
+                self.ev_read_val
+            } else {
+                self.ev_write_val
+            }
+        } else if dot <= 320 {
+            // Sprite tile loading: ticks 1-4 read bytes 0-3 of the sprite
+            // entry, ticks 5-8 read the X coordinate (byte 3) again.
+            let rel = dot - 257;
+            let idx = (rel / 8) as usize;
+            let sub = (rel % 8) as usize;
+            let byte = if sub < 4 { sub } else { 3 };
+            self.sec_oam[(idx * 4 + byte) & 0x1F]
+        } else {
+            // Background pipeline initialization reads the first byte of
+            // secondary OAM.
+            self.sec_oam[0]
         }
     }
 
