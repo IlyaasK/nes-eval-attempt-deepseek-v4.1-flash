@@ -397,6 +397,12 @@ impl Noise {
     }
 
     fn clock_timer(&mut self) {
+        #[cfg(feature = "trace")]
+        {
+            if std::env::var("NOISE_TRACE").is_ok() && self.timer_counter == 0 {
+                eprintln!("NCLK cyc={} shift={:04X} dac={}", APU_NOW.with(|c| c.get()), self.shift, self.output());
+            }
+        }
         // The period table holds exact CPU-cycle periods, so the divider counts
         // down from `period` and fires when it reaches 0.
         if self.timer_counter > 0 {
@@ -629,6 +635,11 @@ fn mix_lin() -> f32 {
 #[cfg(not(feature = "trace"))]
 fn mix_lin() -> f32 { unsafe { MIX_LIN } }
 
+#[cfg(feature = "trace")]
+thread_local! {
+    static APU_NOW: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
+}
+
 pub struct Apu {
     pulse: [Pulse; 2],
     triangle: Triangle,
@@ -703,6 +714,8 @@ impl Apu {
         }
         self.last_cycle = cpu_cycle;
         self.have_last_cycle = true;
+        #[cfg(feature = "trace")]
+        APU_NOW.with(|c| c.set(cpu_cycle));
 
         // Pending $4017 reset (applied 3 or 4 CPU cycles after the write).
         let mut suppress_frame_tick = false;

@@ -33,6 +33,21 @@ fn fir_mode() -> u32 {
     unsafe { FIR_MODE }
 }
 
+/// The integrate-and-dump window has a group delay of half a sample period;
+/// emitting half a sample later cancels it (calibrated against the reference).
+static mut AUDIO_PHASE: f64 = 0.5;
+#[cfg(feature = "trace")]
+fn audio_phase_samples() -> f64 {
+    unsafe {
+        if let Ok(v) = std::env::var("A_PHASE") {
+            if let Ok(n) = v.parse::<f64>() { AUDIO_PHASE = n; }
+        }
+        AUDIO_PHASE
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn audio_phase_samples() -> f64 { unsafe { AUDIO_PHASE } }
+
 /// Start-up delay in samples (before the first emitted sample).
 static mut AUDIO_START_SAMPLES: f64 = 17.94;
 #[cfg(feature = "trace")]
@@ -128,7 +143,7 @@ fn load_audio_env() {
             if let Ok(f) = v.parse::<f64>() { LP_HZ = f; }
         }
         if let Ok(v) = std::env::var("A_MIX_AVG") {
-            if let Ok(n) = v.parse::<usize>() { MIX_AVG = n.clamp(1, 16); }
+            if let Ok(n) = v.parse::<usize>() { MIX_AVG = n.clamp(1, 64); }
         }
         if let Ok(v) = std::env::var("A_AA_POLES") {
             if let Ok(n) = v.parse::<usize>() { AA_POLES = n.min(4); }
@@ -366,7 +381,11 @@ pub struct System {
     pub out: Vec<i16>,
     audio_acc: f64,
     mix_sum: f64,
-    mix_hist: [f64; 16],
+    /// Integrate-and-dump accumulator: mixer sum and cycle count since the
+    /// previous emitted sample.
+    mix_acc: f64,
+    mix_n: u32,
+    mix_hist: [f64; 64],
     mix_idx: usize,
     aa_y: [f64; 4],
     #[cfg(feature = "trace")]
@@ -426,7 +445,9 @@ impl System {
             out: Vec::with_capacity(8192),
             audio_acc: 0.0,
             mix_sum: 0.0,
-            mix_hist: [0.0; 16],
+            mix_acc: 0.0,
+            mix_n: 0,
+            mix_hist: [0.0; 64],
             mix_idx: 0,
             aa_y: [0.0; 4],
             #[cfg(feature = "trace")]
@@ -486,7 +507,7 @@ impl System {
             self.len_dump = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
             self.p1_dump.clear();
         }
-        self.audio_acc = self.audio_start_delay;
+        self.audio_acc = self.audio_start_delay + audio_phase_samples();
         self.prev_y3 = 0.0;
         self.hp1_x = 0.0;
         self.hp1_y = 0.0;
@@ -994,12 +1015,15 @@ impl System {
         // from the current value instead of an all-zero history (which would
         // delay the whole signal by the filter's group delay).
         let raw = self.apu.mix() as f64;
+        let mut m = raw;
         let avg = unsafe { MIX_AVG };
-        let leaving = (self.mix_idx + 16 - avg) & 15;
-        self.mix_sum += raw - self.mix_hist[leaving];
-        self.mix_hist[self.mix_idx] = raw;
-        self.mix_idx = (self.mix_idx + 1) & 15;
-        let mut m = self.mix_sum / avg as f64;
+        if avg > 1 {
+            let leaving = (self.mix_idx + 64 - avg) & 63;
+            self.mix_sum += raw - self.mix_hist[leaving];
+            self.mix_hist[self.mix_idx] = raw;
+            self.mix_idx = (self.mix_idx + 1) & 63;
+            m = self.mix_sum / avg as f64;
+        }
         // Anti-alias before decimation (the reference band-limits its output
         // stage, which keeps fast noise from aliasing into the audible band).
         let aa_poles = unsafe { AA_POLES };
@@ -1013,9 +1037,14 @@ impl System {
                 self.aa_y[st] = m;
             }
         }
+        self.mix_acc += m;
+        self.mix_n += 1;
         self.audio_acc += SAMPLE_RATE as f64 / CPU_HZ;
         if self.audio_acc >= 1.0 {
             self.audio_acc -= 1.0;
+            let m = self.mix_acc / self.mix_n as f64;
+            self.mix_acc = 0.0;
+            self.mix_n = 0;
             #[allow(unused_unsafe)]
             let (s_scale, a1, a2, a3) = unsafe {
                 (
