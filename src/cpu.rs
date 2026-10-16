@@ -510,6 +510,12 @@ impl System {
     /// Execute one instruction (or service a pending interrupt).
     pub fn cpu_step(&mut self) {
         self.cpu.instr_cycles = 0;
+        #[cfg(feature = "trace")]
+        {
+            if std::env::var("EXEC_LOG").is_ok() {
+                eprintln!("X {} {:04X}", self.ppu.frame, self.cpu.pc);
+            }
+        }
         if self.cpu.jammed {
             // The CPU is frozen; the PPU/APU keep running.
             self.tick_cycle();
