@@ -1002,6 +1002,15 @@ impl System {
                 let nz = self.ppu.fb.iter().filter(|&&v| v != 0).count();
                 eprintln!("FRAMEEND ppu_frame={} sl={} dot={} since_boundary={} total_dots={}",
                     self.ppu.frame, self.ppu.scanline, self.ppu.dot, self.ppu.dots_since_boundary, self.ppu.total_dots);
+                if let Ok(v) = std::env::var("OAMDUMP") {
+                    if v == format!("{}", self.ppu.frame) {
+                        for i in 0..64 {
+                            let o = &self.ppu.oam[i * 4..i * 4 + 4];
+                            eprintln!("OAM {:2} y={:3} tile={:02X} attr={:02X} x={:3}", i, o[0], o[1], o[2], o[3]);
+                        }
+                        eprintln!("OAMCTRL {:02X} MASK {:02X}", self.ppu.ctrl, self.ppu.mask);
+                    }
+                }
                 let calls = {
                     static mut CALLS: u64 = 0;
                     let c = unsafe { CALLS } + 1;

@@ -29,9 +29,25 @@ def build(init_nops: int) -> bytes:
         e(b"\xd0\xfd")                          # bne w2
         e(b"\x88")                              # dey
         e(b"\xd0\xf8")                          # bne w1
-    # palette $3F00 = $0F, then enable rendering (BG only, blank pattern)
-    e(b"\xa9\x3f\x8d\x06\x20\xa9\x00\x8d\x06\x20\xa9\x0f\x8d\x07\x20")
-    e(b"\xa9\x0a\x8d\x01\x20")
+    # palette: $3F00 = $0F (backdrop), $3F01 = $30 (colour 1)
+    e(b"\xa9\x3f\x8d\x06\x20\xa9\x00\x8d\x06\x20\xa9\x0f\x8d\x07\x20\xa9\x30\x8d\x07\x20")
+    # CHR tile 1 low plane = $AA (alternating columns), high plane = 0
+    e(b"\xa9\x00\x8d\x06\x20\xa9\x10\x8d\x06\x20")
+    for _ in range(8):
+        e(b"\xa9\xaa\x8d\x07\x20")
+    for _ in range(8):
+        e(b"\xa9\x00\x8d\x07\x20")
+    # nametable: 960 bytes of tile 1 (lo), then attributes = 0
+    e(b"\xa9\x20\x8d\x06\x20\xa9\x00\x8d\x06\x20")
+    e(b"\xa0\x04\xa2\x00\xa9\x01")          # y=4 pages, x=0, A=1
+    e(b"\x8d\x07\x20\xe8")                    # nt: sta $2007 / inx
+    e(b"\xd0\xf8")                              #   bne nt
+    e(b"\x88")
+    e(b"\xd0\xf2")                              # nt2: dey / bne nt2
+    e(b"\xa2\x40\xa9\x00")                    # 64 attribute bytes = 0
+    e(b"\x8d\x07\x20\xca")
+    e(b"\xd0\xfa")
+    e(b"\xa9\x0a\x8d\x01\x20")                # enable BG rendering
     # phase control
     for _ in range(init_nops):
         e(b"\xea")
