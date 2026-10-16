@@ -979,8 +979,9 @@ impl System {
         #[cfg(feature = "trace")]
         {
             if std::env::var("FRAME_TRACE").is_ok() {
-                eprintln!("FRAMEBEGIN ppu_frame={} row0={:04X},{:04X},{:04X},{:04X}",
-                    self.ppu.frame, self.ppu.fb[0], self.ppu.fb[1], self.ppu.fb[2], self.ppu.fb[3]);
+                eprintln!("FRAMEBEGIN ppu_frame={} sl={} dot={} since_boundary={} total_dots={} row0={:04X},{:04X},{:04X},{:04X}",
+                    self.ppu.frame, self.ppu.scanline, self.ppu.dot, self.ppu.dots_since_boundary, self.ppu.total_dots,
+                    self.ppu.fb[0], self.ppu.fb[1], self.ppu.fb[2], self.ppu.fb[3]);
             }
         }
         self.ppu.frame_complete = false;
@@ -999,6 +1000,8 @@ impl System {
         {
             if std::env::var("FRAME_TRACE").is_ok() {
                 let nz = self.ppu.fb.iter().filter(|&&v| v != 0).count();
+                eprintln!("FRAMEEND ppu_frame={} sl={} dot={} since_boundary={} total_dots={}",
+                    self.ppu.frame, self.ppu.scanline, self.ppu.dot, self.ppu.dots_since_boundary, self.ppu.total_dots);
                 let calls = {
                     static mut CALLS: u64 = 0;
                     let c = unsafe { CALLS } + 1;

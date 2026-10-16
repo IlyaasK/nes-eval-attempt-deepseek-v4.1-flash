@@ -322,6 +322,8 @@ pub struct Ppu {
     pub frame: u64,
     pub total_dots: u64,
     pub odd_frame: bool,
+    /// Dots processed since the last 261->0 frame boundary (diagnostic).
+    pub dots_since_boundary: u64,
     /// Rendering-enabled state sampled at `odd_decide_dot()` on the pre-render
     /// line; the odd-frame skip at dot 340 uses this sample.
     pub render_at_skip: bool,
@@ -409,6 +411,7 @@ impl Ppu {
             frame: 0,
             total_dots: 0,
             odd_frame: true,
+            dots_since_boundary: 0,
             render_at_skip: false,
             frame_complete: false,
             bg_latch_nt: 0,
@@ -1616,6 +1619,7 @@ impl Ppu {
                 self.frame += 1;
                 self.odd_frame = !self.odd_frame;
                 self.frame_complete = true;
+                self.dots_since_boundary = 0;
             }
         } else if self.scanline == 261
             && self.odd_frame
@@ -1628,6 +1632,11 @@ impl Ppu {
             self.frame += 1;
             self.odd_frame = !self.odd_frame;
             self.frame_complete = true;
+            self.dots_since_boundary = 0;
+        }
+        #[cfg(feature = "trace")]
+        {
+            self.dots_since_boundary += 1;
         }
     }
 }
