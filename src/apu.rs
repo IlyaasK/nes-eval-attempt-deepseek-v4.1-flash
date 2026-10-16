@@ -617,6 +617,19 @@ fn tri_weight() -> usize {
 fn tri_weight() -> usize { unsafe { TRI_WEIGHT } }
 
 #[cfg(feature = "trace")]
+static mut TND4: u32 = 0;
+#[cfg(feature = "trace")]
+fn tnd4_on() -> bool {
+    unsafe {
+        if let Ok(v) = std::env::var("A_TND4") {
+            if let Ok(n) = v.parse::<u32>() { TND4 = n; }
+        }
+        TND4 != 0
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn tnd4_on() -> bool { unsafe { TND4 != 0 } }
+
 fn mix_lin() -> f32 {
     unsafe {
         if let Ok(v) = std::env::var("A_MIX_LIN") {
@@ -626,6 +639,19 @@ fn mix_lin() -> f32 {
     }
 }
 #[cfg(not(feature = "trace"))]
+static mut TND4: u32 = 0;
+#[cfg(feature = "trace")]
+fn tnd4_on() -> bool {
+    unsafe {
+        if let Ok(v) = std::env::var("A_TND4") {
+            if let Ok(n) = v.parse::<u32>() { TND4 = n; }
+        }
+        TND4 != 0
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn tnd4_on() -> bool { unsafe { TND4 != 0 } }
+
 fn mix_lin() -> f32 { unsafe { MIX_LIN } }
 
 pub struct Apu {
@@ -636,6 +662,7 @@ pub struct Apu {
     frame: FrameCounter,
     pulse_table: [f32; 31],
     tnd_table: [f32; 794],
+    tnd_table4: [f32; 3176],
     /// Last `cpu_cycle` observed by `clock`, used to ignore duplicate calls for
     /// the same CPU cycle (defensive; the contract is one call per cycle).
     last_cycle: u64,
@@ -652,6 +679,7 @@ impl Apu {
             frame: FrameCounter::default(),
             pulse_table: [0.0; 31],
             tnd_table: [0.0; 794],
+            tnd_table4: [0.0; 3176],
             last_cycle: 0,
             have_last_cycle: false,
         };
@@ -672,6 +700,16 @@ impl Apu {
                 0.0
             } else {
                 (163.67f32 * m) / ((97316.0f32 * m) / n as f32 + 100.0f32)
+            };
+        }
+        // 4x finer TND resolution keeps the fractional part of the noise and
+        // DMC weights (the 1x table truncates each term to an integer).
+        for n in 0..3176 {
+            let x = n as f32 / 4.0;
+            apu.tnd_table4[n] = if n == 0 {
+                0.0
+            } else {
+                (163.67f32 * m) / ((97316.0f32 * m) / x + 100.0f32)
             };
         }
         apu.reset();
@@ -850,6 +888,12 @@ impl Apu {
 
     pub fn write(&mut self, addr: u16, val: u8, cpu_cycle: u64) {
         #[cfg(feature = "trace")]
+        {
+            if std::env::var("APU_WLOG").is_ok() {
+                eprintln!("AW {:04X} {:02X} cyc={}", addr, val, cpu_cycle);
+            }
+        }
+        #[cfg(feature = "trace")]
         if std::env::var("TRACE_APUW").is_ok() {
             eprintln!("APUW cyc={} addr={:04X} val={:02X}", cpu_cycle, addr, val);
         }
@@ -1018,16 +1062,26 @@ impl Apu {
         // Weights (triangle 12, noise 5.6, DMC 2.2) are calibrated against the
         // reference's measured levels for each channel (tools: mixcurve.py,
         // mixcurve2.py, dmccurve.py); the table's constant uses the same scale.
-        let tnd = tri_weight() * self.triangle.output() as usize
-            + (28 * noise_weight() / 7 * self.noise.output() as usize) / 5
-            + (22 * self.dmc.output_level as usize) / 10;
+        let tnd = if tnd4_on() {
+            (48 * self.triangle.output() as usize)
+                + (112 * noise_weight() / 7 * self.noise.output() as usize) / 5
+                + (88 * self.dmc.output_level as usize) / 10
+        } else {
+            tri_weight() * self.triangle.output() as usize
+                + (28 * noise_weight() / 7 * self.noise.output() as usize) / 5
+                + (22 * self.dmc.output_level as usize) / 10
+        };
         // The NES DACs are unipolar, so the mixer has a constant idle offset.
         // The reference keeps it: the output filters turn it into the fixed
         // start-up transient that every one of its recordings begins with.
         // The value is calibrated against the reference (0.25 of the mixer's
         // full scale); the offset itself is then removed by the DC blockers, so
         // it does not affect steady-state output.
-        self.pulse_table[pulses] + self.tnd_table[tnd] + unsafe { MIX_DC }
+        if tnd4_on() {
+            self.pulse_table[pulses] + self.tnd_table4[tnd.min(3175)] + unsafe { MIX_DC }
+        } else {
+            self.pulse_table[pulses] + self.tnd_table[tnd] + unsafe { MIX_DC }
+        }
     }
 
     // -- extra introspection (not part of the frozen interface) -------------

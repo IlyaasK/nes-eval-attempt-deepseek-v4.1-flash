@@ -40,6 +40,10 @@ def build(mode: str) -> bytes:
     e(b"\x78\xd8\xa2\xff\x9a")              # sei cld ldx #$FF txs
     e(b"\xa9\x00\x8d\x15\x40")              # $4015 = 0
     e(b"\xa9\x40\x8d\x17\x40")              # $4017 = $40 (frame counter: 4-step, IRQ off)
+    # Enable the channel first: the length counter only loads from the table
+    # while the channel's $4015 enable flag is set.
+    en_all = {"pulse1": 0x01, "pulse2": 0x02, "tri": 0x04, "noise": 0x08, "dmc": 0x10}[mode]
+    e(b"\xa9" + bytes([en_all]) + b"\x8d\x15\x40")
     if mode == "tri":
         # length halt + linear reload 127; period 558 -> ~100 Hz
         e(b"\xa9\xff\x8d\x08\x40")
@@ -56,7 +60,7 @@ def build(mode: str) -> bytes:
         e(b"\xa9" + bytes([en]) + b"\x8d\x15\x40")
     elif mode == "noise":
         e(b"\xa9\x3f\x8d\x0c\x40")          # halt, const vol 15
-        e(b"\xa9\x04\x8d\x0e\x40")          # mode 0, period index 4
+        e(b"\xa9\x0f\x8d\x0e\x40")          # mode 0, period index 15 (slow)
         e(b"\xa9\x08\x8d\x0f\x40")
         e(b"\xa9\x08\x8d\x15\x40")
     elif mode == "dmc":
