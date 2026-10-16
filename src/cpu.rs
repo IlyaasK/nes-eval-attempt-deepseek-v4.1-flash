@@ -505,6 +505,10 @@ impl System {
         if self.cpu.irq_seen {
             let line = self.irq_line();
             if line {
+                #[cfg(feature = "trace")]
+                if std::env::var("IRQ_TRACE").is_ok() {
+                    eprintln!("IRQ take @dot={} sl={} dot={} pc={:04X}", self.ppu.total_dots, self.ppu.scanline, self.ppu.dot, self.cpu.pc);
+                }
                 self.interrupt_sequence(0xFFFE, false);
                 return;
             }

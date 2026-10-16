@@ -38,6 +38,24 @@ fn fir_mode() -> u32 {
     unsafe { FIR_MODE }
 }
 
+/// Warm-start the output FIR from the first sample instead of an all-zero
+/// history (removes the filter's group delay from the reference's start-up
+/// transient).
+static mut FIR_WARM: bool = true;
+#[cfg(feature = "trace")]
+fn fir_warm() -> bool {
+    unsafe {
+        if let Ok(v) = std::env::var("FIR_WARM") {
+            FIR_WARM = v != "0";
+        }
+        FIR_WARM
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn fir_warm() -> bool {
+    unsafe { FIR_WARM }
+}
+
 /// Audio pipeline constants (tuned against the reference emulator).
 const AUDIO_START_DELAY: f64 = -(728.0 / (CPU_HZ / SAMPLE_RATE as f64));
 /// Scale applied to the DC-blocked mixer output.
@@ -309,6 +327,7 @@ pub struct System {
     hp2_y: f64,
     lp_y: f64,
     fir_hist: [f64; FIR_TAPS],
+    audio_warm: bool,
 }
 
 impl System {
@@ -359,6 +378,7 @@ impl System {
             hp2_y: 0.0,
             lp_y: 0.0,
             fir_hist: [0.0; FIR_TAPS],
+            audio_warm: true,
         };
         load_audio_env();
         s.power_on();
@@ -404,6 +424,7 @@ impl System {
         for v in self.fir_hist.iter_mut() {
             *v = 0.0;
         }
+        self.audio_warm = true;
         self.reset_sequence();
     }
 
@@ -867,6 +888,10 @@ impl System {
 
     #[inline]
     fn audio_tick(&mut self) {
+        // The reference's first output samples are the DC-blocker transient of
+        // the mixer's idle level, not filtered silence: its output FIR starts
+        // from the current value instead of an all-zero history (which would
+        // delay the whole signal by the filter's group delay).
         self.audio_acc += SAMPLE_RATE as f64 / CPU_HZ;
         if self.audio_acc >= 1.0 {
             self.audio_acc -= 1.0;
@@ -910,6 +935,13 @@ impl System {
                     self.y3_dump.push(y3 as f32);
                 }
             }
+            if self.audio_warm && fir_warm() {
+                for h in self.fir_hist.iter_mut() {
+                    *h = y3;
+                }
+                self.prev_y3 = y3;
+                self.audio_warm = false;
+            }
             // Shift the sample through the FIR history and convolve.
             for i in 0..(FIR_TAPS - 1) {
                 self.fir_hist[i] = self.fir_hist[i + 1];
@@ -932,6 +964,10 @@ impl System {
             }
             self.prev_y3 = y3;
             let v = (acc * s_scale).clamp(-32768.0, 32767.0) as i16;
+            #[cfg(feature = "trace")]
+            if std::env::var("MIXDUMP").is_ok() && self.out.len() < 10 {
+                eprintln!("smp {}: m={:.5} y1={:.5} y2={:.5} y3={:.5} v={}", self.out.len(), m, y1, y2, y3, v);
+            }
             self.out.push(v);
         }
     }
