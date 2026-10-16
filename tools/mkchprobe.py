@@ -42,7 +42,8 @@ def build(mode: str) -> bytes:
     e(b"\xa9\x40\x8d\x17\x40")              # $4017 = $40 (frame counter: 4-step, IRQ off)
     # Enable the channel first: the length counter only loads from the table
     # while the channel's $4015 enable flag is set.
-    en_all = {"pulse1": 0x01, "pulse2": 0x02, "tri": 0x04, "noise": 0x08, "dmc": 0x10}[mode]
+    en_all = {"pulse1": 0x01, "pulse2": 0x02, "tri": 0x04, "noise": 0x08, "dmc": 0x10,
+              "noise_env": 0x08, "noise_mode1": 0x08, "pulse_env": 0x01}[mode]
     e(b"\xa9" + bytes([en_all]) + b"\x8d\x15\x40")
     if mode == "tri":
         # length halt + linear reload 127; period 558 -> ~100 Hz
@@ -58,6 +59,25 @@ def build(mode: str) -> bytes:
         e(b"\xa9\xf8\x8d" + bytes([(base + 2) & 0xFF, base >> 8])) # period low (1016 -> ~110 Hz)
         e(b"\xa9\x03\x8d" + bytes([(base + 3) & 0xFF, base >> 8]))
         e(b"\xa9" + bytes([en]) + b"\x8d\x15\x40")
+    elif mode == "noise_env":
+        e(b"\xa9\x08\x8d\x0c\x40")          # envelope mode, period 8, no halt
+        e(b"\xa9\x04\x8d\x0e\x40")          # mode 0, period index 4
+        e(b"\xa9\x08\x8d\x0f\x40")
+        e(b"\xa9\x08\x8d\x15\x40")
+    elif mode == "noise_mode1":
+        e(b"\xa9\x3f\x8d\x0c\x40")          # halt, const vol 15
+        e(b"\xa9\x8f\x8d\x0e\x40")          # mode 1 (periodic), index 15 (slow)
+        e(b"\xa9\x08\x8d\x0f\x40")
+        e(b"\xa9\x08\x8d\x15\x40")
+    elif mode == "pulse_env":
+        e(b"\xa9\x08\x8d\x01\x40")          # sweep off
+        e(b"\xa9\xf8\x8d\x02\x40")
+        e(b"\xa9\x03\x8d\x03\x40")
+        e(b"\xa9\x08\x8d\x15\x40")          # enable first so length loads
+        e(b"\xa9\x28\x8d\x00\x40")          # duty 2, envelope mode, period 8
+        e(b"\xa9\xf8\x8d\x02\x40")
+        e(b"\xa9\x03\x8d\x03\x40")
+        e(b"\xa9\x01\x8d\x15\x40")
     elif mode == "noise":
         e(b"\xa9\x3f\x8d\x0c\x40")          # halt, const vol 15
         e(b"\xa9\x0f\x8d\x0e\x40")          # mode 0, period index 15 (slow)

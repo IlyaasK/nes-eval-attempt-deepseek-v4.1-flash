@@ -93,6 +93,9 @@ const TRIANGLE_TABLE: [u8; 32] = [
 ];
 
 /// Noise timer periods in APU cycles (= NTSC CPU cycles / 2).
+/// Noise timer periods.  The reference counts these in APU clocks (the timer
+/// is clocked once per two CPU cycles), i.e. twice the documented CPU-cycle
+/// periods; verified against the reference's measured shift-register rate.
 const NOISE_PERIOD_APU: [u16; 16] = [
     4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068,
 ];
@@ -392,17 +395,15 @@ struct Noise {
 }
 
 impl Noise {
+    /// Divider reload value in APU clocks.  The counter is loaded with
+    /// period+1 (the reference clocks the shift register once every
+    /// (period+1) APU clocks; measured against its output as 8138 CPU cycles
+    /// for period index $F).
     fn period(&self) -> u16 {
-        NOISE_PERIOD_APU[(self.period_index & 0x0F) as usize] + noise_period_plus()
+        NOISE_PERIOD_APU[(self.period_index & 0x0F) as usize] + noise_period_plus() + 1
     }
 
     fn clock_timer(&mut self) {
-        #[cfg(feature = "trace")]
-        {
-            if std::env::var("NOISE_TRACE").is_ok() && self.timer_counter == 0 {
-                eprintln!("NCLK cyc={} shift={:04X} dac={}", APU_NOW.with(|c| c.get()), self.shift, self.output());
-            }
-        }
         // The period table holds exact CPU-cycle periods, so the divider counts
         // down from `period` and fires when it reaches 0.
         if self.timer_counter > 0 {
@@ -418,6 +419,12 @@ impl Noise {
             let feedback = (self.shift & 1) ^ ((self.shift >> tap) & 1);
             self.shift = ((self.shift >> 1) | (feedback << 14)) & 0x7FFF;
             self.clocks = self.clocks.wrapping_add(1);
+            #[cfg(feature = "trace")]
+            {
+                if std::env::var("NOISE_TRACE").is_ok() {
+                    eprintln!("NCLK cyc={} shift={:04X} dac={}", APU_NOW.with(|c| c.get()), self.shift, self.output());
+                }
+            }
         }
     }
 

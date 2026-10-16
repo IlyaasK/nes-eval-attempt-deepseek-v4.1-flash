@@ -35,7 +35,7 @@ fn fir_mode() -> u32 {
 
 /// The integrate-and-dump window has a group delay of half a sample period;
 /// emitting half a sample later cancels it (calibrated against the reference).
-static mut AUDIO_PHASE: f64 = 0.5;
+static mut AUDIO_PHASE: f64 = -0.6;
 #[cfg(feature = "trace")]
 fn audio_phase_samples() -> f64 {
     unsafe {
