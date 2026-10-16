@@ -658,3 +658,43 @@ match; the four games are unaffected (999/999/996/992 of 1000).
   note-onset ringing: robotfindskitten rms 2.2 -> 7.0/11.5/15.2, file-fixers
   211.9 -> 219/239/267, stallar 184.7 -> 186/195/207.  The sharp FIR is what
   the reference has; reverted.
+
+## Root cause of the row-0 artefacts pinned down
+Two probes settle it:
+* A "visibility phase" probe (the NMI handler alternates the backdrop colour)
+  shows both emulators flip at the same frame - vblank writes become visible at
+  the same time.
+* The single-read probe shows the *difference*: on the frame after the paint,
+  the reference's frame already contains 2 pixels of the *new* palette in
+  row 0, ours contains 0.  Those pixels are the first pixels of the next
+  frame's scanline 0 rendered before `emu_run_frame` returns.
+So the reference's frame boundary is *dot/cpu-cycle precise* (it stops a few
+dots past the wrap - 2 here) while ours stops at the next *instruction*
+boundary, up to 21 dots past.  That granularity difference is exactly what the
+games' row-0 artefacts are (ours re-renders up to 7 cycles' worth of scanline 0
+with the new palette, the reference 0-2 dots' worth).  Fixing it needs a CPU
+that can be suspended mid-instruction.
+Also verified this session: `PAL_DELAY` (0..8) does not change this - the
+palette write latency is not the mechanism.
+
+## Verified: NMI count parity in vblank-write scenarios
+A probe that performs one controlled `bit $2002` at a swept delay and then
+paints the NMI counter shows byte-identical counters in both emulators at every
+frame, for three delay configurations - so no NMI is lost or gained, and the
+earlier "paint frame" mismatches are purely the boundary-granularity effect
+above, not a suppression difference.
+
+## Rejected: stopping the frame before the wrap
+Implemented "end the call when the PPU is in the last N dots of the pre-render
+line" (so no pixel of the following frame is drawn inside the call) with a
+`wrapped` guard so every call still contains exactly one wrap:
+  FRAME_STOP_ZONE=0  -> rfK 299/300, totdiff 2
+  FRAME_STOP_ZONE=24 -> rfK 297/300, totdiff 64513
+The three differing frames show whole regions missing/extra (frame 3: 28586 px
+rows 128-239, frame 4: 32846 px rows 0-128, frame 11: 3081 px), i.e. the
+frame-to-dump mapping shifts - the call then covers the pre-render tail of one
+frame instead of the head of the next.  Reverted; `emu_run_frame` still ends at
+the first instruction boundary after the wrap.  Together with the visibility
+probe result above, this confirms the residual row-0 difference is *only* the
+boundary granularity (2 dots in the reference vs up to 21 in ours) and that
+closing it requires suspending the CPU mid-instruction.
