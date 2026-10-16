@@ -12,9 +12,11 @@ use crate::system::System;
 /// dot is counted as dot 1.  One extra dot was tried and *rejected*: it moves
 /// ppu_vbl_nmi 02/03/04/06/07/08/09/10 from 298,298,299,298,298,298,299,298 to
 /// 297,297,294,297,297,297,294,297, apu_test 2/4/5/8 from 299,299,299,298 to
-/// 294,298,295,295, cpu_interrupts_v2__1 299 -> 295 and cpu_reset 299 -> 298.
-/// The knob stays for diagnosis; default 0 matches the reference.
-static mut POWER_ALIGN_DOTS: usize = 0;
+/// The ABI fixes the power-on alignment: the PPU is at scanline 0, dot 25
+/// after the reset sequence has clocked from scanline 0, dot 0.  Eight CPU
+/// cycles clock 24 dots, so one PPU-only dot is required; the reference (and
+/// its audio/APU behaviour) matches that, and the knob stays for diagnosis.
+static mut POWER_ALIGN_DOTS: usize = 1;
 #[cfg(feature = "trace")]
 fn power_align_dots() -> usize {
     unsafe {
