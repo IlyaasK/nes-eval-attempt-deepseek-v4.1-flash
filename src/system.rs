@@ -112,7 +112,7 @@ fn nmi_level_poll() -> bool {
 
 /// Extra CPU cycles of delay before an NMI edge becomes a visible request.
 /// 0 = visible immediately (same cycle), 1 = from the next cycle.
-static mut NMI_DELAY: u32 = 1;
+static mut NMI_DELAY: u32 = 0;
 #[cfg(feature = "trace")]
 fn nmi_delay_cycles() -> u32 {
     unsafe {
@@ -188,6 +188,25 @@ const ACCESS_PHASE: u32 = 2;
 
 /// DMA alignment behaviour.  0 = always 513 cycles, 1 = always 514,
 /// 2 = 513/514 by the parity of the halt cycle (get on even), 3 = inverted.
+/// CPU cycles after power-on during which $2000/$2001/$2005/$2006 writes are
+/// ignored (ABI: 29658).
+static mut PPU_WARMUP: u64 = 29658;
+#[cfg(feature = "trace")]
+fn ppu_warmup_cycles() -> u64 {
+    unsafe {
+        if let Ok(v) = std::env::var("PPU_WARMUP") {
+            if let Ok(n) = v.parse::<u64>() {
+                PPU_WARMUP = n;
+            }
+        }
+        PPU_WARMUP
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn ppu_warmup_cycles() -> u64 {
+    unsafe { PPU_WARMUP }
+}
+
 static mut DMA_ALIGN: u8 = 2;
 #[cfg(feature = "trace")]
 fn dma_align_mode() -> u8 {
@@ -683,7 +702,7 @@ impl System {
         match addr {
             0x0000..=0x1FFF => self.ram[(addr & 0x07FF) as usize] = val,
             0x2000..=0x3FFF => {
-                let warmup = self.cycles < 29658;
+                let warmup = self.cycles < ppu_warmup_cycles();
                 let System { ppu, mapper, .. } = self;
                 ppu.write_register(addr & 0x2007, val, mapper.as_mut(), warmup);
             }
@@ -754,6 +773,14 @@ impl System {
     fn sample_hist(&mut self) {
         if self.hist_enabled && self.cycles & 0x1FF == 0 {
             self.hist.push(self.cpu.pc);
+        }
+        #[cfg(feature = "trace")]
+        if let Ok(v) = std::env::var("WATCHPC") {
+            if let Ok(a) = u16::from_str_radix(v.trim_start_matches("0x"), 16) {
+                if self.cpu.pc == a {
+                    eprintln!("WATCH {:04X} cyc={} ppu_f={} sl={} dot={}", a, self.cycles, self.ppu.frame, self.ppu.scanline, self.ppu.dot);
+                }
+            }
         }
         if self.pcwatch != 0 && self.cycles % self.pcwatch == 0 {
             eprintln!("pcwatch cyc={} pc={:04X} a={:02X} x={:02X} y={:02X} sp={:02X}",

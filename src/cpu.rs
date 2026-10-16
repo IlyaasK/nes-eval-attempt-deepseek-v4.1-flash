@@ -6,23 +6,26 @@
 
 use crate::system::System;
 
-/// Extra PPU-only dots applied at the end of the reset sequence; shifts the
-/// CPU/PPU phase without touching the APU.  Diagnostic knob (trace builds).
-static mut POWER_DOTS: usize = 0;
+/// PPU-only dots clocked at the end of the reset sequence.  The ABI fixes the
+/// power-on alignment exactly: at the first opcode fetch the PPU is at
+/// scanline 0, dot 25, having clocked from dot 0.  Eight CPU cycles clock 24
+/// dots, so exactly one extra dot is needed.  Verified to the dot against the
+/// reference with a free-running raster-band probe.
+static mut POWER_ALIGN_DOTS: usize = 1;
 #[cfg(feature = "trace")]
-fn power_dots() -> usize {
+fn power_align_dots() -> usize {
     unsafe {
         if let Ok(v) = std::env::var("POWER_DOTS") {
             if let Ok(n) = v.parse::<usize>() {
-                POWER_DOTS = n;
+                POWER_ALIGN_DOTS = n;
             }
         }
-        POWER_DOTS
+        POWER_ALIGN_DOTS
     }
 }
 #[cfg(not(feature = "trace"))]
-fn power_dots() -> usize {
-    unsafe { POWER_DOTS }
+fn power_align_dots() -> usize {
+    unsafe { POWER_ALIGN_DOTS }
 }
 
 pub const FLAG_C: u8 = 0x01;
@@ -466,17 +469,16 @@ impl System {
         let lo = self.rd(0xFFFC) as u16;
         let hi = self.rd(0xFFFD) as u16;
         self.cpu.pc = (hi << 8) | lo;
-        // One extra cycle of PPU/APU warm-up: this reproduces the documented
-        // power-on alignment (PPU at scanline 0, dot 25 at the first opcode
-        // fetch, counting the PPU's first dot as dot 1).
+        // One extra cycle of PPU/APU warm-up plus one PPU-only dot.  The ABI
+        // fixes the power-on alignment: "at that same moment the PPU is at
+        // scanline 0, dot 25 (the reset sequence has run with the PPU clocking
+        // from scanline 0, dot 0)".  Eight CPU cycles clock 24 dots, so one
+        // more dot is needed; verified to the dot with a free-running raster
+        // probe (band position now matches the reference exactly).
         self.idle_read(self.cpu.pc);
-        #[cfg(feature = "trace")]
-        eprintln!("DBG reset: dots={} extra={}", self.ppu.total_dots, power_dots());
-        for _ in 0..power_dots() {
+        for _ in 0..power_align_dots() {
             self.ppu_only_dot();
         }
-        #[cfg(feature = "trace")]
-        eprintln!("DBG reset after: dots={}", self.ppu.total_dots);
     }
 
     // ------------------------------------------------------------- stepping ---
