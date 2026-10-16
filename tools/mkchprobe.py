@@ -43,7 +43,7 @@ def build(mode: str) -> bytes:
     # Enable the channel first: the length counter only loads from the table
     # while the channel's $4015 enable flag is set.
     en_all = {"pulse1": 0x01, "pulse2": 0x02, "tri": 0x04, "noise": 0x08, "dmc": 0x10,
-              "noise_env": 0x08, "noise_mode1": 0x08, "pulse_env": 0x01}[mode]
+              "noise_env": 0x08, "noise_mode1": 0x08, "pulse_env": 0x01, "combo": 0x07}[mode]
     e(b"\xa9" + bytes([en_all]) + b"\x8d\x15\x40")
     if mode == "tri":
         # length halt + linear reload 127; period 558 -> ~100 Hz
@@ -78,6 +78,20 @@ def build(mode: str) -> bytes:
         e(b"\xa9\xf8\x8d\x02\x40")
         e(b"\xa9\x03\x8d\x03\x40")
         e(b"\xa9\x01\x8d\x15\x40")
+    elif mode == "combo":
+        e(b"\xa9\x0f\x8d\x15\x40")          # enable pulse1+pulse2+triangle+noise? just p1,p2,tri
+        e(b"\xa9\xbf\x8d\x00\x40")          # pulse1: duty2, halt, const vol 15
+        e(b"\xa9\x08\x8d\x01\x40")
+        e(b"\xa9\xf8\x8d\x02\x40")
+        e(b"\xa9\x03\x8d\x03\x40")
+        e(b"\xa9\x7f\x8d\x04\x40")          # pulse2: duty1, halt, const vol 15
+        e(b"\xa9\x08\x8d\x05\x40")
+        e(b"\xa9\x30\x8d\x06\x40")
+        e(b"\xa9\x02\x8d\x07\x40")
+        e(b"\xa9\xff\x8d\x08\x40")          # triangle: halt + linear reload 127
+        e(b"\xa9\x2e\x8d\x0a\x40")
+        e(b"\xa9\x02\x8d\x0b\x40")
+        e(b"\xa9\x07\x8d\x15\x40")          # enable p1,p2,tri
     elif mode == "noise":
         e(b"\xa9\x3f\x8d\x0c\x40")          # halt, const vol 15
         e(b"\xa9\x0f\x8d\x0e\x40")          # mode 0, period index 15 (slow)
