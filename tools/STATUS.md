@@ -605,3 +605,11 @@ vs 212 - the sharp anti-alias filter is required, so the FIR stays.
 * NMI acceptance delayed by 1-3 cycles: the 5/7/9/11-cycle loop probe shows the
   reference matches the immediate model exactly (96/96 comparisons).
 * IIR output filter (above).
+
+## Low-pass corner re-checked with the transient in place
+A_LP (the pre-FIR one-pole low-pass) was swept again now that the start-up
+transient is reproduced: 40000 -> rfK rms@0 2.21, file 211.9/0.9781,
+stal 184.7/0.8646; 25000 -> 2.86, 211.8/0.9782, 183.0/0.8665; 15000 -> 4.24,
+213.2/0.9779, 181.3/0.8682; 10000 -> -, 217.6/0.9770, 181.0/0.8680.  The
+music-game gains at 25000 are ~1 rms but the transient loses 0.65 rms, so the
+default stays 40000.
