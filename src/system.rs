@@ -116,7 +116,7 @@ fn audio_prewarm() -> u32 {
 static mut AUDIO_SCALE: f64 = 32000.0;
 static mut HP1_HZ: f64 = 90.0;
 static mut HP2_HZ: f64 = 440.0;
-static mut LP_HZ: f64 = 40000.0;
+static mut LP_HZ: f64 = 150000.0;
 /// Number of CPU cycles averaged before sampling the mixer output.  Sampling
 /// the raw mixer at 44.1 kHz would alias the fastest noise period (223 kHz)
 /// into the audible band; averaging over a few CPU cycles band-limits it the
