@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""Per-channel APU probe.  Sets up a single channel at a fixed pitch/volume and
+spins, so the reference's WAV can be compared against ours for that channel
+alone.
+
+Usage: mkchprobe.py <mode> <out.nes>
+Modes: tri, pulse1, pulse2, noise, dmc
+"""
+import struct
+import sys
+
+ORIGIN = 0xE000
+
+
+class Asm:
+    def __init__(self):
+        self.code = bytearray()
+        self.labels = {}
+        self.fixups = []
+
+    def emit(self, b):
+        self.code.extend(b)
+
+    def label(self, name):
+        self.labels[name] = len(self.code)
+
+    def branch(self, op, target):
+        self.emit(bytes([op]))
+        self.fixups.append((len(self.code), target))
+        self.emit(b"\x00")
+
+    def resolve(self):
+        for pos, target in self.fixups:
+            self.code[pos] = (self.labels[target] - (pos + 1)) & 0xFF
+
+
+def build(mode: str) -> bytes:
+    a = Asm()
+    e, br = a.emit, a.branch
+    e(b"\x78\xd8\xa2\xff\x9a")              # sei cld ldx #$FF txs
+    e(b"\xa9\x00\x8d\x15\x40")              # $4015 = 0
+    e(b"\xa9\x40\x8d\x17\x40")              # $4017 = $40 (frame counter: 4-step, IRQ off)
+    if mode == "tri":
+        # length halt + linear reload 127; period 558 -> ~100 Hz
+        e(b"\xa9\xff\x8d\x08\x40")
+        e(b"\xa9\x2e\x8d\x0a\x40")
+        e(b"\xa9\x02\x8d\x0b\x40")
+        e(b"\xa9\x04\x8d\x15\x40")          # enable triangle
+    elif mode in ("pulse1", "pulse2"):
+        base = 0x4000 if mode == "pulse1" else 0x4004
+        en = 0x01 if mode == "pulse1" else 0x02
+        e(b"\xa9\xbf\x8d" + bytes([base & 0xFF, base >> 8]))       # duty 2, halt, const vol 15
+        e(b"\xa9\x08\x8d" + bytes([(base + 1) & 0xFF, base >> 8])) # sweep off
+        e(b"\xa9\xf8\x8d" + bytes([(base + 2) & 0xFF, base >> 8])) # period low (1016 -> ~110 Hz)
+        e(b"\xa9\x03\x8d" + bytes([(base + 3) & 0xFF, base >> 8]))
+        e(b"\xa9" + bytes([en]) + b"\x8d\x15\x40")
+    elif mode == "noise":
+        e(b"\xa9\x3f\x8d\x0c\x40")          # halt, const vol 15
+        e(b"\xa9\x04\x8d\x0e\x40")          # mode 0, period index 4
+        e(b"\xa9\x08\x8d\x0f\x40")
+        e(b"\xa9\x08\x8d\x15\x40")
+    elif mode == "dmc":
+        e(b"\xa9\x0f\x8d\x10\x40")          # DMC rate index 15, no IRQ, no loop
+        e(b"\xa9\x40\x8d\x11\x40")          # direct load $40
+        e(b"\xa9\x10\x8d\x15\x40")
+    else:
+        raise SystemExit("bad mode")
+    a.label("spin"); e(b"\x4c" + struct.pack("<H", ORIGIN + len(a.code)))
+    a.resolve()
+    prg = bytearray(0x4000)
+    prg[0x2000:0x2000 + len(a.code)] = a.code
+    for v in (0x3FFA, 0x3FFC, 0x3FFE):
+        prg[v:v + 2] = struct.pack("<H", ORIGIN)
+    return b"NES\x1a" + bytes([1, 0, 0, 0]) + b"\x00" * 8 + bytes(prg)
+
+
+if __name__ == "__main__":
+    mode, out = sys.argv[1], sys.argv[2]
+    open(out, "wb").write(build(mode))
+    print("wrote", out, "mode", mode)

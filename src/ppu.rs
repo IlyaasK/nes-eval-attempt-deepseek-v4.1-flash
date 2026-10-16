@@ -967,6 +967,10 @@ impl Ppu {
                             let fine_y = (self.v >> 12) & 7;
                             let pt = if self.ctrl & 0x10 != 0 { 0x1000 } else { 0 };
                             let a = pt | ((self.bg_latch_nt as u16) << 4) | fine_y;
+                            #[cfg(feature = "trace")]
+                            if std::env::var("TRACE_BGPT").is_ok() && self.scanline < 2 {
+                                eprintln!("BGPT sl={} dot={} ctrl={:02X} pt={:04X} a={:04X}", self.scanline, dot, self.ctrl, pt, a);
+                            }
                             let lo = self.vram_read(a, mapper);
                             if !keep_latch {
                                 self.bg_latch_lo = lo;
