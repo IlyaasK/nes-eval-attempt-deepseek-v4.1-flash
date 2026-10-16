@@ -820,6 +820,10 @@ impl Apu {
     }
 
     pub fn write(&mut self, addr: u16, val: u8, cpu_cycle: u64) {
+        #[cfg(feature = "trace")]
+        if std::env::var("TRACE_APUW").is_ok() {
+            eprintln!("APUW cyc={} addr={:04X} val={:02X}", cpu_cycle, addr, val);
+        }
         match addr {
             0x4000..=0x4003 => self.write_pulse(0, (addr & 0x03) as u8, val),
             0x4004..=0x4007 => self.write_pulse(1, (addr & 0x03) as u8, val),
@@ -982,11 +986,12 @@ impl Apu {
     /// Instantaneous analog output level (0.0..=1.0), accurate non-linear mixer.
     pub fn mix(&self) -> f32 {
         let pulses = (self.pulse[0].output(PULSE1) + self.pulse[1].output(PULSE2)) as usize;
-        // Noise is scaled by 4/5 of its nominal weight to match the
-        // reference's measured noise level (see tools: mixcurve).
-        let tnd = 4 * (3 * self.triangle.output() as usize
-            + self.dmc.output_level as usize)
-            + (28 * noise_weight() / 7 * self.noise.output() as usize) / 5;
+        // Weights (triangle 12, noise 5.6, DMC 2.2) are calibrated against the
+        // reference's measured levels for each channel (tools: mixcurve.py,
+        // mixcurve2.py, dmccurve.py); the table's constant uses the same scale.
+        let tnd = 12 * self.triangle.output() as usize
+            + (28 * noise_weight() / 7 * self.noise.output() as usize) / 5
+            + (22 * self.dmc.output_level as usize) / 10;
         // The NES DACs are unipolar, so the mixer has a constant idle offset.
         // The reference keeps it: the output filters turn it into the fixed
         // start-up transient that every one of its recordings begins with.

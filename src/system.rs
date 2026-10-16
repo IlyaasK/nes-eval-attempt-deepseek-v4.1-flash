@@ -49,7 +49,7 @@ fn audio_start_samples() -> f64 { unsafe { AUDIO_START_SAMPLES } }
 
 /// Output FIR length (odd, 3..35) and cutoff (fraction of the sample rate).
 static mut FIR_TAPS_CFG: usize = 35;
-static mut FIR_FC_CFG: f64 = 0.3628;
+static mut FIR_FC_CFG: f64 = 0.50;
 #[cfg(feature = "trace")]
 fn fir_taps_cfg() -> usize {
     unsafe {
