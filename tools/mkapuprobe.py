@@ -1,64 +1,77 @@
 #!/usr/bin/env python3
-"""APU mixer probe: sweeps the DMC DAC ($4011 = 0..127, 3 frames each) with all
-channels disabled, so the output level directly encodes the mixer's response to
-a known digital level.  Comparing the reference's WAV with ours reveals any
-mixer curve difference.
+"""APU level probe: configures one channel to a steady, audible tone and spins.
 
-Usage: mkapuprobe.py <out.nes>
+Usage: mkapuprobe.py <pulse|tri|noise|pulse2> <out.nes>
+
+Useful for comparing APU levels and waveforms against the reference: the pulse
+probe plays duty 2 at constant volume 15 with a ~440 Hz period, the triangle
+probe holds its linear counter at $FF, the noise probe uses a mid period.
 """
 import struct
 import sys
 
-ORIGIN = 0xE000
+ORIGIN = 0xC000
 
 
-class Asm:
-    def __init__(self):
-        self.code = bytearray()
-        self.labels = {}
-        self.fixups = []
+def build(mode: str, vol: int = 15, lo: int = 0xFD, hi: int = 0x00) -> bytes:
+    code = bytearray()
 
-    def emit(self, b):
-        self.code.extend(b)
+    def e(b):
+        code.extend(b)
 
-    def label(self, name):
-        self.labels[name] = len(self.code)
-
-    def branch(self, op, target):
-        self.emit(bytes([op]))
-        self.fixups.append((len(self.code), target))
-        self.emit(b"\x00")
-
-    def resolve(self):
-        for pos, target in self.fixups:
-            self.code[pos] = (self.labels[target] - (pos + 1)) & 0xFF
-
-
-def build() -> bytes:
-    a = Asm()
-    e, br = a.emit, a.branch
-    e(b"\x78\xd8\xa2\xff\x9a")              # sei cld ldx #$FF txs
-    e(b"\xa9\x00\x8d\x15\x40")              # $4015 = 0 (all channels off)
-    e(b"\xa9\x00\x8d\x11\x40")              # $4011 = 0
-    e(b"\xa2\x00")                          # X = level
-    a.label("outer")
-    # wait ~3 frames using the vblank flag
-    for i in range(3):
-        a.label("w1%d" % i); e(b"\x2c\x02\x20"); br(0x10, "w1%d" % i)
-        a.label("w2%d" % i); e(b"\x2c\x02\x20"); br(0x30, "w2%d" % i)
-    e(b"\x8e\x11\x40")                      # sta $4011 (X)
-    e(b"\xe8")                              # inx
-    e(b"\xe0\x80")                          # cpx #$80
-    br(0xD0, "outer")
-    a.label("spin"); e(b"\x4c" + struct.pack("<H", ORIGIN + len(a.code)))
-    a.resolve()
-    prg = bytearray(0x4000)
-    prg[0x2000:0x2000 + len(a.code)] = a.code
-    for v in (0x3FFA, 0x3FFC, 0x3FFE):
-        prg[v:v + 2] = struct.pack("<H", ORIGIN)
-    return b"NES\x1a" + bytes([1, 0, 0, 0]) + b"\x00" * 8 + bytes(prg)
+    e(b"\x78\xd8\xa2\xff\x9a")                  # sei, cld, ldx #$FF, txs
+    e(b"\xa9\x00\x8d\x00\x20\x8d\x01\x20")      # PPU off
+    for _ in range(3):                           # wait 3 vblanks
+        e(b"\x2c\x02\x20\xd0\xfb".replace(b"\xd0", b"\x10"))  # bit $2002 / bpl
+        e(b"\x2c\x02\x20\x30\xfb")               # bit $2002 / bmi
+    e(b"\xa9\x40\x8d\x17\x40")                   # $4017 = $40 (4-step, IRQ off)
+    if mode == "pulse":
+        e(b"\xa9\x01\x8d\x15\x40")               # enable pulse 1
+        e(b"\xa9" + bytes([0xB0 | (vol & 0x0F)]) + b"\x8d\x00\x40")  # duty 2, halt, const vol
+        e(b"\xa9\x00\x8d\x01\x40")               # sweep off
+        e(b"\xa9" + bytes([lo]) + b"\x8d\x02\x40")
+        e(b"\xa9" + bytes([hi]) + b"\x8d\x03\x40")
+    elif mode == "pulse2":
+        e(b"\xa9\x02\x8d\x15\x40")
+        e(b"\xa9\xbf\x8d\x04\x40")
+        e(b"\xa9\x00\x8d\x05\x40")
+        e(b"\xa9\xfd\x8d\x06\x40")
+        e(b"\xa9\x00\x8d\x07\x40")
+    elif mode == "both":
+        e(b"\xa9\x03\x8d\x15\x40")               # enable pulse 1 + 2
+        e(b"\xa9" + bytes([0xB0 | (vol & 0x0F)]) + b"\x8d\x00\x40")
+        e(b"\xa9\x00\x8d\x01\x40")
+        e(b"\xa9" + bytes([lo]) + b"\x8d\x02\x40")
+        e(b"\xa9" + bytes([hi]) + b"\x8d\x03\x40")
+        e(b"\xa9" + bytes([0xB0 | (vol & 0x0F)]) + b"\x8d\x04\x40")
+        e(b"\xa9\x00\x8d\x05\x40")
+        e(b"\xa9" + bytes([lo]) + b"\x8d\x06\x40")
+        e(b"\xa9" + bytes([hi]) + b"\x8d\x07\x40")
+    elif mode == "tri":
+        e(b"\xa9\x04\x8d\x15\x40")               # enable triangle
+        e(b"\xa9\xff\x8d\x08\x40")               # control + reload = $FF
+        e(b"\xa9\xfd\x8d\x0a\x40")
+        e(b"\xa9\x00\x8d\x0b\x40")
+    elif mode == "noise":
+        e(b"\xa9\x08\x8d\x15\x40")               # enable noise
+        e(b"\xa9\x3f\x8d\x0c\x40")               # halt, const vol 15
+        e(b"\xa9\x08\x8d\x0e\x40")               # mode 0, period index 8
+    else:
+        raise SystemExit("unknown mode %s" % mode)
+    spin = len(code)
+    e(b"\x4c" + struct.pack("<H", ORIGIN + spin))   # jmp spin
+    prg = bytearray(0x8000)
+    off = ORIGIN - 0x8000
+    prg[off:off + len(code)] = code
+    for a in (0x7FFA, 0x7FFC, 0x7FFE):
+        prg[a:a + 2] = struct.pack("<H", ORIGIN)
+    return b"NES\x1a" + bytes([2, 0, 0, 0]) + b"\x00" * 8 + bytes(prg)
 
 
 if __name__ == "__main__":
-    open(sys.argv[1], "wb").write(build())
-    print("wrote", sys.argv[1])
+    mode, out = sys.argv[1], sys.argv[2]
+    vol = int(sys.argv[3]) if len(sys.argv) > 3 else 15
+    lo = int(sys.argv[4], 0) if len(sys.argv) > 4 else 0xFD
+    hi = int(sys.argv[5], 0) if len(sys.argv) > 5 else 0x00
+    open(out, "wb").write(build(mode, vol, lo, hi))
+    print("wrote", out, mode)
