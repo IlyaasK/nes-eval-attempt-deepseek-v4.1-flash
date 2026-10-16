@@ -1409,6 +1409,16 @@ impl Ppu {
     }
 
     /// Advance to the next dot; handles scanline/frame boundaries.
+    /// Number of dots the next frame will take: 89342, or 89341 when the
+    /// odd-frame pre-render dot gets skipped (rendering enabled).
+    pub fn expected_frame_len(&self) -> u64 {
+        if self.odd_frame && self.render_at_skip {
+            89341
+        } else {
+            89342
+        }
+    }
+
     pub fn advance(&mut self) {
         #[cfg(feature = "trace")]
         {

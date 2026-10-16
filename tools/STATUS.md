@@ -383,3 +383,76 @@ ours pushes 0x24, i.e. our NMI lands two mainline instructions later.
 All eight ppu_vbl_nmi ROMs still pass; instr_timing is now 399/400 frames
 exact (only the 2-pixel row-0 artifact at frame 3); games at 1000 frames:
 robotfindskitten 999, rhde 999, file-fixers 996, stallar 992.
+
+# Session: input replay, interrupt fuzz, frame-boundary characterisation
+
+## Findings
+1. **Controller strobe** (verified against `spec/docs/nesdev-wiki/Controller_reading.md`):
+   while `$4016` bit 0 is 1 the 4021 loads its parallel inputs continuously, so
+   every read returns button A.  Our read path already reloaded the shift
+   register while strobing (no change needed; kept a comment there).
+2. **Input replays** work in `tools/fastdiff.py` via `--replay FILE` (same
+   format as the oracle's).  Without input all four games are >=99.5%
+   frame-exact over 600 frames; with a random 900-frame replay
+   robotfindskitten drops to 755/900 because one 1-frame difference in a
+   message box propagates into the game state.
+3. **Isolated the mechanism**: holding A from frame 0 makes rfK differ on
+   *exactly one* frame (12).  The reference draws the message box top bar
+   starting at x=26, ours at x=8 - an 18-pixel offset.  The bar is drawn by a
+   mid-frame raster split, so our split lands 18 dots (6 CPU cycles) earlier.
+4. **Root cause**: `emu_run_frame` must advance until the PPU leaves the
+   pre-render scanline (ABI).  The reference is dot-precise; we stop at the
+   first CPU instruction boundary *after* the wrap, i.e. 0-7 cycles (0-21
+   dots) late, and that overshoot shifts every raster split by the same
+   amount, and varies from frame to frame.
+5. **Tried and rejected** (all reverted; `frame_extra_dots()` stays 0):
+   * FRAME_EXTRA 1/2/3 (dots): overshoots, measurably worse (rfK 2 -> 4/10;
+     stallar 18 -> 79).
+   * PAL_DELAY 2..6: no effect at all (palette writes happen in vblank).
+   * "Carry" frame boundary (lock the boundary to the dot-precise schedule,
+     carrying the overshoot into the next frame): frame budgets become
+     irregular, rfK 599/600 -> 589/600, 36M total diff.  Reverted.
+   * Extra power-on PPU dot: no observable effect (NMI-synced code re-syncs).
+     The ABI's "PPU at scanline 0, dot 25" is consistent with our 8-cycle
+     reset (24 dots) if the reference counts the first PPU dot as 1.
+6. A dot-precise frame end needs a CPU that can be suspended mid-instruction.
+   The CPU's microcode consumes cycles individually but is a straight-line
+   Rust function, so this is a large refactor.  Everything else in the
+   emulator already matches the reference frame-exactly.
+
+## Verified this session (differential, against the oracle)
+* `tools/cpufuzz.py` - CPU torture test: ~660 cases (all documented opcodes
+  plus the stable illegal set, several addressing forms, C and D both ways),
+  checksum of A/X/Y/P over all of them -> **identical** to the reference.
+* Interrupt-timing fuzz (APU frame IRQ vs PPU NMI, 5-cycle delay sweep, 64
+  scenarios recording both handlers' pushed P and the hijack order) - **all
+  64 identical**.
+* NMI phase probe and APU-frame-IRQ phase probe: **exact match**.
+* Audio, 600 frames: robotfindskitten 99.86% sample-exact (rms 31); game
+  audio unaffected by input.  Only difference found: the reference has a
+  ~14-sample decaying transient at the very start of the first frame.
+
+## Audio follow-up (same session)
+Per-window (0.5 s) correlation against the reference, file-fixers 600 frames:
+windows with matching game state reach **corr 0.9988-0.9989** (rms 47-80);
+the poor windows (corr 0.19, -0.003) are exactly where the *game state*
+diverged earlier (video first bad frame 29).  So residual audio differences
+are downstream of the frame-boundary issue, not an APU problem.
+* LP_HZ 0 vs 40000: identical output (the low-pass is already effectively off).
+* Emphasis bits: differential probe (backdrop $21, $2001 emphasis 0..7) -
+  reference and ours produce identical (emphasis<<6)|colour values.
+* Games use mapper 0 (robotfindskitten, rhde) and mapper 4 (file-fixers,
+  stallar); mappers 1-3 are exercised only by the test ROMs.
+
+## Why the frame boundary cannot be fixed cheaply (measured, not guessed)
+`emu_run_frame` must contain the PPU wrap.  With the CPU/PPU locked at 3
+dots/cycle, the frame therefore ends 3*K dots late (K = 0..7 remaining cycles
+of the instruction that crossed the wrap).  Options:
+* End before the wrap -> frame may contain no vblank at all (breaks games).
+* Carry the overshoot into the next frame -> irregular frame budgets
+  (rfK 599/600 -> 589/600).  Measured, reverted.
+* Discard the overshoot by rewinding the PPU -> the PPU stays frame-locked
+  but the CPU/APU then drift ahead by K cycles per frame, destroying the
+  stable CPU/PPU phase that NMI-synced raster code depends on.
+Only a CPU that can be suspended mid-instruction (cycle-resumable microcode)
+can have both; the CPU here is a straight-line Rust function.
