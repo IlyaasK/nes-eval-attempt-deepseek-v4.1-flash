@@ -110,6 +110,21 @@ fn nmi_level_poll() -> bool {
     unsafe { NMI_LEVEL_POLL }
 }
 
+static mut NMI_PENDING_NOW: bool = true;
+#[cfg(feature = "trace")]
+fn nmi_pending_now() -> bool {
+    unsafe {
+        if let Ok(v) = std::env::var("NMI_PENDING_NOW") {
+            NMI_PENDING_NOW = v != "0";
+        }
+        NMI_PENDING_NOW
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn nmi_pending_now() -> bool {
+    unsafe { NMI_PENDING_NOW }
+}
+
 /// Whether the first emu_run_frame call returns without emulating (the
 /// reference behaves this way).
 static mut FIRST_FRAME_SKIPS: bool = true;
@@ -405,7 +420,13 @@ impl System {
         if line {
             self.nmi_high_dots = self.nmi_high_dots.saturating_add(1);
             if self.nmi_high_dots == nmi_latch_dots() {
-                self.nmi_latch = true;
+                if nmi_pending_now() {
+                    // The interrupt request becomes visible immediately, so an
+                    // instruction ending in this same cycle already sees it.
+                    self.cpu.nmi_pending = true;
+                } else {
+                    self.nmi_latch = true;
+                }
             }
         } else {
             self.nmi_high_dots = 0;

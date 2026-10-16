@@ -338,3 +338,48 @@ forever in the $E440-$E462 delay routines.  With the decimal branches removed:
   instr_timing: status $80, log "2-branch_timing | Passed | All 2 tests passed"
 
 Games are unchanged (199/198/196/192 of 200 frames on 200 frames).
+
+## instr_timing now PASSES (decimal mode removed)
+Verified: `instr_timing` status $80, log "2-branch_timing | Passed | All 2
+tests passed"; 1697/1700 frames identical to the reference (the remaining
+frames are the 2-pixel row-0 artifact and the result line appearing 2 frames
+earlier than the reference).  Diagnosis path: the ROM's delay loops spin
+forever because `adc #$FF` did not decrement A; tracing showed A going
+$96 -> $FB across an `adc #$FF` with the D flag set -- BCD arithmetic, which
+the 2A03 does not have.
+
+## Where nmi_and_irq stands (cpu_interrupts_v2__3)
+Reference table (12 rows): 23 21 21 20 20 20 20 20 20 20 25 25
+Ours:                      21 21 20 20 20 20 20 20 20 24 24 25
+Differences: row 1 bit 1 (0x23 vs 0x21), and the C flag at rows 3/10/11 --
+i.e. the interrupt lands one instruction earlier relative to the
+`clv; sec; lda #$01; clc; nop` window.  PLP/RTI flag handling and the pushed
+status for NMI/IRQ match the reference in dedicated probes, so the remaining
+difference is sub-instruction interrupt acceptance timing in that specific
+scenario.
+
+## nmi_and_irq / mmc3_test_2__4 notes
+* mmc3_test_2__4's failing check compares LE41C's return value with $22; the
+  IRQ handler is `asl $20` + ack, so $22 means "IRQ taken after the inc $20",
+  $21 means before.  So the check is sub-instruction IRQ timing.
+* A12 clocking in our MMC3 gives ~242 rises/frame with the sprite pattern
+  table at $1000 (one per scanline, from the dummy sprite fetches), matching
+  what the test's $2000=$08 case needs.
+
+# MAJOR FIX 2: NMI request made visible immediately
+`sample_nmi` used to set `nmi_latch`, which became `cpu.nmi_pending` only at
+the *next* CPU cycle, so an instruction ending in the same cycle did not see
+the NMI and it was taken one instruction late.  Now the request is raised at
+the sampling instant (`NMI_PENDING_NOW = true`, knob of the same name).
+
+Effect on cpu_interrupts_v2__3 (nmi_and_irq) table:
+  reference: 23 21 21 20 20 20 20 20 20 20 25 25
+  before   : 21 21 20 20 20 20 20 20 20 24 24 25   (rows 1-10 wrong)
+  after    : 23 21 21 20 20 20 20 20 20 20 24 24   (rows 1-10 now match)
+The last two rows (NMI arriving while an IRQ is being serviced) still differ
+in the C bit: reference pushes 0x25 (C=1, taken right after the IRQ handler),
+ours pushes 0x24, i.e. our NMI lands two mainline instructions later.
+
+All eight ppu_vbl_nmi ROMs still pass; instr_timing is now 399/400 frames
+exact (only the 2-pixel row-0 artifact at frame 3); games at 1000 frames:
+robotfindskitten 999, rhde 999, file-fixers 996, stallar 992.
