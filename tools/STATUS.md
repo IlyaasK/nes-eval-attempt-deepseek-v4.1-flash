@@ -553,3 +553,55 @@ The first diverging frames (5, 6) differ over the whole screen, so ending the
 call early desynchronises the game's rendering rather than just moving the
 boundary.  Reverted; `emu_run_frame` still ends at the first instruction
 boundary after the wrap.
+
+# Session: audio start-up transient matched (mixer idle offset + chain pre-run)
+
+## What the reference's first samples are
+Every reference recording starts with the same fixed 100-sample transient
+(identical across all three ROMs to the sample): 6295, 7314, 6653, 6284, 5779,
+5320, ... and decays to zero.  It is the filter chain's response to the mixer's
+idle level: the NES DACs are unipolar, so the mixer has a constant offset where
+mine had none.
+
+## Fix
+* `MIX_DC` (apu.rs) is now 0.25 of the mixer's full scale and is added as a
+  *constant to the mixer output*.  Previously the knob fed the *zero entries*
+  of the pulse/TND tables, which put a huge discontinuity between table entry
+  0 and entry 1 and produced audible clicks (file-fixers rms 225 -> 645).
+* `AUDIO_PREWARM` (system.rs) = 17: `AUDIO_START_DELAY` holds the first emitted
+  sample back by about one FIR group delay, and the reference's chain is
+  *running* during that window.  Run the chain (HP1, HP2, LP, FIR) that many
+  times with the current mixer value before the first output sample, discarding
+  the result.  Calibrated: 16 -> 12.6 rms on rfK, 17 -> 2.2, 18 -> 5.0.
+* Verified against free parameters: MIX_DC 0.25 -> robo 2.2 / file 211.9 /
+  stal 184.7 (rms) and corr 0.9993 / 0.9781 / 0.8646; 0.22 -> 5.8; 0.27 -> 2.5;
+  0.30 -> 7.2.
+
+## Measured effect (600 frames, samples later 1 shorter)
+| ROM | before | after |
+|---|---|---|
+| robotfindskitten | rms 30.9, corr 0.9993, 99.86% equal | **rms 1.6, corr 0.9993, 99.94% equal** |
+| rhde | rms 32.8, 99.73% | **rms 11.0, corr 0.9843, 99.80%** |
+| file-fixers | rms 259.2, corr 0.9675 | **rms 257.4, corr 0.9682** |
+| stallar | rms 216.3, corr 0.8999 | **rms 214.1, corr 0.9024** |
+
+## Where the remaining audio difference is
+Per-window analysis of file-fixers/stallar: most 0.5 s windows are corr
+0.9988-0.9993 (rms 34-95), a few are bad (corr 0.19 / rms 457).  The first
+sustained divergence is at frame ~29-30 in both, i.e. exactly when the first
+note starts, and it is a *transient* at the note onset: mine rings
+(53, -53, -93, 399, 4388, 6212) where the reference transitions cleanly
+(17, 21, 26, 31, 27, -6, -988).  That is the 35-tap linear-phase FIR's step-
+response ringing.  Replacing it with cascaded one-pole low-passes (minimum
+phase, no ringing) was tried and is far worse: corr 0.0357 vs 0.9781, rms 1393
+vs 212 - the sharp anti-alias filter is required, so the FIR stays.
+
+## Rejected this session (all with numbers, all reverted)
+* +1 PPU dot at power-on (ABI "dot 25"): corpus-wide degradation
+  (ppu_vbl_nmi 07: 298 -> 297, apu_test__2: 299 -> 294, cpu_reset 299 -> 298,
+  suite total 9703 -> 6697/10500 for +2).
+* Ending frames *before* the wrap to remove the row-0 artifact: rfK 599/600 ->
+  586/600, totdiff 2 -> 244905 (the call then covers a different frame).
+* NMI acceptance delayed by 1-3 cycles: the 5/7/9/11-cycle loop probe shows the
+  reference matches the immediate model exactly (96/96 comparisons).
+* IIR output filter (above).

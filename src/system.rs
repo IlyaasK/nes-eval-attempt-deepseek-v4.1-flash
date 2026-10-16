@@ -38,9 +38,13 @@ fn fir_mode() -> u32 {
     unsafe { FIR_MODE }
 }
 
-/// How many extra chain evaluations to run before the first emitted sample
-/// (the reference's chain covers the AUDIO_START_DELAY window).
-static mut AUDIO_PREWARM: u32 = 18;
+/// How many extra chain evaluations to run before the first emitted sample.
+/// `AUDIO_START_DELAY` holds the first emitted sample back by about one FIR
+/// group delay; the reference's chain is running during that window, which is
+/// what puts its first sample part way into the response to the mixer's idle
+/// level.  Calibrated against the reference: 17 reproduces its start-up
+/// transient (see MIX_DC in apu.rs).
+static mut AUDIO_PREWARM: u32 = 17;
 #[cfg(feature = "trace")]
 fn audio_prewarm() -> u32 {
     unsafe {

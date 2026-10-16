@@ -576,7 +576,7 @@ fn noise_weight() -> usize {
     unsafe { NOISE_WEIGHT }
 }
 
-static mut MIX_DC: f32 = 0.0;
+static mut MIX_DC: f32 = 0.25;
 
 pub struct Apu {
     pulse: [Pulse; 2],
@@ -604,17 +604,6 @@ impl Apu {
             tnd_table: [0.0; 203],
             last_cycle: 0,
             have_last_cycle: false,
-        };
-        let dc = unsafe {
-            #[cfg(feature = "trace")]
-            {
-                if let Ok(v) = std::env::var("MIX_DC") {
-                    if let Ok(f) = v.parse::<f32>() {
-                        MIX_DC = f;
-                    }
-                }
-            }
-            MIX_DC
         };
         for n in 0..31 {
             apu.pulse_table[n] = if n == 0 {
@@ -970,9 +959,12 @@ impl Apu {
         let tnd = 3 * self.triangle.output() as usize
             + noise_weight() * self.noise.output() as usize
             + self.dmc.output_level as usize;
-        // The NES DACs are unipolar, so the mixer has a constant idle offset
-        // (the reference keeps it: the output filters turn it into the fixed
-        // start-up transient seen at the beginning of every recording).
+        // The NES DACs are unipolar, so the mixer has a constant idle offset.
+        // The reference keeps it: the output filters turn it into the fixed
+        // start-up transient that every one of its recordings begins with.
+        // The value is calibrated against the reference (0.25 of the mixer's
+        // full scale); the offset itself is then removed by the DC blockers, so
+        // it does not affect steady-state output.
         self.pulse_table[pulses] + self.tnd_table[tnd] + unsafe { MIX_DC }
     }
 
