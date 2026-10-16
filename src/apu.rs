@@ -618,17 +618,14 @@ impl Apu {
         };
         for n in 0..31 {
             apu.pulse_table[n] = if n == 0 {
-                // The formula's value at zero input is its limit (95.52/100);
-                // the reference keeps that DC offset, which the output filters
-                // turn into the power-on transient.
-                dc * (95.52 / 100.0) / (95.52 / 100.0 + 159.79 / 100.0)
+                0.0
             } else {
                 95.52f32 / (8128.0f32 / n as f32 + 100.0f32)
             };
         }
         for n in 0..203 {
             apu.tnd_table[n] = if n == 0 {
-                dc * (159.79 / 100.0) / (95.52 / 100.0 + 159.79 / 100.0)
+                0.0
             } else {
                 163.67f32 / (24329.0f32 / n as f32 + 100.0f32)
             };
@@ -973,7 +970,10 @@ impl Apu {
         let tnd = 3 * self.triangle.output() as usize
             + noise_weight() * self.noise.output() as usize
             + self.dmc.output_level as usize;
-        self.pulse_table[pulses] + self.tnd_table[tnd]
+        // The NES DACs are unipolar, so the mixer has a constant idle offset
+        // (the reference keeps it: the output filters turn it into the fixed
+        // start-up transient seen at the beginning of every recording).
+        self.pulse_table[pulses] + self.tnd_table[tnd] + unsafe { MIX_DC }
     }
 
     // -- extra introspection (not part of the frozen interface) -------------

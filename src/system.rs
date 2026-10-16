@@ -38,22 +38,23 @@ fn fir_mode() -> u32 {
     unsafe { FIR_MODE }
 }
 
-/// Warm-start the output FIR from the first sample instead of an all-zero
-/// history (removes the filter's group delay from the reference's start-up
-/// transient).
-static mut FIR_WARM: bool = true;
+/// How many extra chain evaluations to run before the first emitted sample
+/// (the reference's chain covers the AUDIO_START_DELAY window).
+static mut AUDIO_PREWARM: u32 = 18;
 #[cfg(feature = "trace")]
-fn fir_warm() -> bool {
+fn audio_prewarm() -> u32 {
     unsafe {
-        if let Ok(v) = std::env::var("FIR_WARM") {
-            FIR_WARM = v != "0";
+        if let Ok(v) = std::env::var("A_PREWARM") {
+            if let Ok(n) = v.parse::<u32>() {
+                AUDIO_PREWARM = n;
+            }
         }
-        FIR_WARM
+        AUDIO_PREWARM
     }
 }
 #[cfg(not(feature = "trace"))]
-fn fir_warm() -> bool {
-    unsafe { FIR_WARM }
+fn audio_prewarm() -> u32 {
+    unsafe { AUDIO_PREWARM }
 }
 
 /// Audio pipeline constants (tuned against the reference emulator).
@@ -905,6 +906,30 @@ impl System {
                     lp_coef(LP_HZ),
                 )
             };
+            // AUDIO_START_DELAY holds the first *emitted* sample back by about
+            // one FIR group delay, but the reference's filter chain is running
+            // during that time: its first sample is already part way into the
+            // chain's response to the mixer's idle level (which is what makes
+            // the fixed start-up transient).  Run the chain that many times
+            // first, discarding the output.
+            if self.audio_warm {
+                self.audio_warm = false;
+                for _ in 0..audio_prewarm() {
+                    let y1 = a1 * (self.hp1_y + m - self.hp1_x);
+                    self.hp1_x = m;
+                    self.hp1_y = y1;
+                    let y2 = a2 * (self.hp2_y + y1 - self.hp2_x);
+                    self.hp2_x = y1;
+                    self.hp2_y = y2;
+                    let y3 = self.lp_y + a3 * (y2 - self.lp_y);
+                    self.lp_y = y3;
+                    for i in 0..(FIR_TAPS - 1) {
+                        self.fir_hist[i] = self.fir_hist[i + 1];
+                    }
+                    self.fir_hist[FIR_TAPS - 1] = y3;
+                    self.prev_y3 = y3;
+                }
+            }
             #[cfg(feature = "trace")]
             {
                 if std::env::var("MIXDUMP").is_ok() {
@@ -934,13 +959,6 @@ impl System {
                 if std::env::var("DUMP_Y3").is_ok() {
                     self.y3_dump.push(y3 as f32);
                 }
-            }
-            if self.audio_warm && fir_warm() {
-                for h in self.fir_hist.iter_mut() {
-                    *h = y3;
-                }
-                self.prev_y3 = y3;
-                self.audio_warm = false;
             }
             // Shift the sample through the FIR history and convolve.
             for i in 0..(FIR_TAPS - 1) {
