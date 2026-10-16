@@ -310,6 +310,11 @@ fn main() {
                 buf.extend_from_slice(&v.to_le_bytes());
             }
             std::fs::write(path, &buf).expect("write mixraw");
+            let mut b0: Vec<u8> = Vec::with_capacity(sys.mix_raw_at.len() * 8);
+            for v in sys.mix_raw_at.iter() {
+                b0.extend_from_slice(&v.to_le_bytes());
+            }
+            std::fs::write(format!("{}.at", path), &b0).expect("write mixraw cycle");
             let mut b2: Vec<u8> = Vec::with_capacity(sys.sample_at.len() * 8);
             for v in sys.sample_at.iter() {
                 b2.extend_from_slice(&v.to_le_bytes());

@@ -390,8 +390,10 @@ pub struct System {
     aa_y: [f64; 4],
     #[cfg(feature = "trace")]
     pub mix_dump: Vec<f32>,
-    /// CPU-rate raw mixer values and each emitted sample's CPU cycle.
+    /// CPU-rate raw mixer values, the CPU cycle of each, and each emitted
+    /// sample's CPU cycle (A_MIXRAW diagnostics).
     pub mix_raw: Vec<f32>,
+    pub mix_raw_at: Vec<u64>,
     pub sample_at: Vec<u64>,
     #[cfg(feature = "trace")]
     pub y3_dump: Vec<f32>,
@@ -456,6 +458,7 @@ impl System {
             #[cfg(feature = "trace")]
             mix_dump: Vec::new(),
             mix_raw: Vec::new(),
+            mix_raw_at: Vec::new(),
             sample_at: Vec::new(),
             #[cfg(feature = "trace")]
             ch_dump: [Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new()],
@@ -509,6 +512,7 @@ impl System {
         {
             self.mix_dump.clear();
         self.mix_raw.clear();
+        self.mix_raw_at.clear();
         self.sample_at.clear();
             self.ch_dump = [Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new()];
             self.len_dump = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
@@ -1026,6 +1030,7 @@ impl System {
         {
             if std::env::var("MIXRAW").is_ok() {
                 self.mix_raw.push(raw as f32);
+                self.mix_raw_at.push(self.cycles);
             }
         }
         let mut m = raw;
