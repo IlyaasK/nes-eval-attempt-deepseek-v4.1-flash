@@ -44,7 +44,8 @@ def build(mode: str) -> bytes:
     # while the channel's $4015 enable flag is set.
     en_all = {"pulse1": 0x01, "pulse2": 0x02, "tri": 0x04, "noise": 0x08, "dmc": 0x10,
               "noise_env": 0x08, "noise_mode1": 0x08, "pulse_env": 0x01, "combo": 0x07,
-              "tri_lc": 0x04, "tri_lc2": 0x04, "tri_p1": 0x04, "tri_p2": 0x04}[mode]
+              "tri_lc": 0x04, "tri_lc2": 0x04, "tri_p1": 0x04, "tri_p2": 0x04,
+              "noise_fast": 0x08, "noise_fast1": 0x08}[mode]
     e(b"\xa9" + bytes([en_all]) + b"\x8d\x15\x40")
     if mode == "tri":
         # length halt + linear reload 127; period 558 -> ~100 Hz
@@ -117,6 +118,16 @@ def build(mode: str) -> bytes:
         e(b"\xa9\x2e\x8d\x0a\x40")
         e(b"\xa9\x02\x8d\x0b\x40")
         e(b"\xa9\x07\x8d\x15\x40")          # enable p1,p2,tri
+    elif mode == "noise_fast":
+        e(b"\xa9\x3f\x8d\x0c\x40")          # halt, const vol 15
+        e(b"\xa9\x04\x8d\x0e\x40")          # mode 0, period index 4 (fast)
+        e(b"\xa9\x08\x8d\x0f\x40")
+        e(b"\xa9\x08\x8d\x15\x40")
+    elif mode == "noise_fast1":
+        e(b"\xa9\x3f\x8d\x0c\x40")
+        e(b"\xa9\x84\x8d\x0e\x40")          # mode 1, index 4
+        e(b"\xa9\x08\x8d\x0f\x40")
+        e(b"\xa9\x08\x8d\x15\x40")
     elif mode == "noise":
         e(b"\xa9\x3f\x8d\x0c\x40")          # halt, const vol 15
         e(b"\xa9\x0f\x8d\x0e\x40")          # mode 0, period index 15 (slow)
