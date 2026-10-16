@@ -74,7 +74,7 @@ fn fir_fc_cfg() -> f64 {
 fn fir_fc_cfg() -> f64 { unsafe { FIR_FC_CFG } }
 
 /// How many extra chain evaluations to run before the first emitted sample.
-/// `AUDIO_START_DELAY` holds the first emitted sample back by about one FIR
+/// The start-up delay holds the first emitted sample back by about one FIR
 /// group delay; the reference's chain is running during that window, which is
 /// what puts its first sample part way into the response to the mixer's idle
 /// level.  Calibrated against the reference: 17 reproduces its start-up
@@ -97,7 +97,6 @@ fn audio_prewarm() -> u32 {
 }
 
 /// Audio pipeline constants (tuned against the reference emulator).
-const AUDIO_START_DELAY: f64 = -(728.0 / (CPU_HZ / SAMPLE_RATE as f64));
 /// Scale applied to the DC-blocked mixer output.
 static mut AUDIO_SCALE: f64 = 32000.0;
 static mut HP1_HZ: f64 = 90.0;

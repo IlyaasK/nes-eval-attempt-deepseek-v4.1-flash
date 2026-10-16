@@ -94,7 +94,7 @@ const TRIANGLE_TABLE: [u8; 32] = [
 
 /// Noise timer periods in APU cycles (= NTSC CPU cycles / 2).
 const NOISE_PERIOD_APU: [u16; 16] = [
-    2, 4, 8, 16, 32, 48, 64, 80, 101, 127, 190, 254, 381, 508, 1017, 2034,
+    4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068,
 ];
 
 /// DMC timer periods in CPU cycles (NTSC rate table).
@@ -563,7 +563,7 @@ fn dmc_dma_disabled() -> bool {
 }
 
 /// Mixer weight of the noise channel (the classic TND formula uses 2).
-static mut NOISE_WEIGHT: usize = 1;
+static mut NOISE_WEIGHT: usize = 2;
 #[cfg(feature = "trace")]
 fn noise_weight() -> usize {
     unsafe {
