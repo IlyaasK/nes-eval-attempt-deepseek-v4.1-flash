@@ -111,7 +111,7 @@ fn pal_delay() -> u64 {
     unsafe { PAL_DELAY }
 }
 
-static mut PPU_DOT_LATE: bool = false;
+static mut PPU_DOT_LATE: bool = true;
 #[cfg(feature = "trace")]
 fn ppu_dot_late() -> bool {
     unsafe {
@@ -686,6 +686,14 @@ impl Ppu {
     /// Apply a (possibly delayed) write to one of the timing-critical
     /// registers.
     fn apply_reg(&mut self, reg: u8, val: u8, _mapper: &mut dyn Mapper) {
+        #[cfg(feature = "trace")]
+        {
+            if std::env::var("TRACE_PPW").is_ok() && (reg == 5 || reg == 6 || reg == 0 || reg == 1) {
+                eprintln!("PW f={} sl={} dot={} reg={} val={:02X} w={} v={:04X} t={:04X} fx={} dots={}",
+                    self.frame, self.scanline, self.dot, 2000u32 + reg as u32, val, self.w as u8, self.v, self.t,
+                    self.fine_x, self.total_dots);
+            }
+        }
         match reg {
             0 => {
                 self.ctrl = val;
@@ -1026,14 +1034,13 @@ impl Ppu {
                 if sl <= 239 && (64..=255).contains(&dot) && dot & 1 == 0 {
                     self.evaluate_sprite_step();
                 }
-                if sl <= 239 && dot == 0 {
-                    // secondary OAM clear happens on dots 0..=63 two bytes per dot
+                if (sl <= 239 || sl == 261) && dot == 0 {
                     self.sprite_count = 0;
                     self.ev_n = 0;
                     self.ev_m = 0;
                     self.ev_mode = EvMode::CheckY;
                 }
-                if sl <= 239 && (0..=63).contains(&dot) && dot & 1 == 1 {
+                if (sl <= 239) && (0..=63).contains(&dot) && dot & 1 == 1 {
                     let base = ((dot - 1) as usize) & 0x1F;
                     self.sec_oam[base] = 0xFF;
                     self.sec_oam[(base + 1) & 0x1F] = 0xFF;

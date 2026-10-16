@@ -694,6 +694,13 @@ impl Mapper for Mmc3 {
             }
         }
         if a12 {
+            #[cfg(feature = "trace")]
+            {
+                if std::env::var("TRACE_A12").is_ok() {
+                    eprintln!("A12RISE dots={} low={} line={} irq={}", self.dot_count, self.low_dots,
+                        self.dot_count / 341, self.irq_pending);
+                }
+            }
             if self.a12_low && self.low_dots >= a12_low_dots() {
                 #[cfg(feature = "trace")]
                 {
