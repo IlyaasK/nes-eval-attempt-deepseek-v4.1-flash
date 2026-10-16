@@ -1041,7 +1041,7 @@ impl Ppu {
                     if std::env::var("TRACE_NOREND").is_err() { self.render_pixel(mapper); }
                 }
                 // The shift registers also shift during the prefetch phase.
-                if (320..=336).contains(&dot) {
+                if (321..=336).contains(&dot) {
                     self.shift_registers();
                 }
 
