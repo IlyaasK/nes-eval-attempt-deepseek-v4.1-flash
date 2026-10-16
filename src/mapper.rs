@@ -332,9 +332,16 @@ impl Uxrom {
             mirroring: mirror_from_header(cart.mirroring),
             bank: 0,
             // iNES mapper 2 is conventionally implemented as a full 8-bit bank
-            // select register without AND-type bus conflicts (UxROM.md), which
-            // is what the reference does.
-            bus_conflicts: false,
+            // select register without AND-type bus conflicts (UxROM.md).  NES
+            // 2.0 submappers override that: 1 = no conflicts, 2 = AND-type.
+            // Confirmed against the reference emulator: a probe that writes 2
+            // to $8000 (where the ROM holds 0x00) and reads $8001 back gets the
+            // selected bank's byte 0x33, i.e. no AND-type conflict masking.
+            bus_conflicts: match cart.submapper {
+                1 => false,
+                2 => true,
+                _ => false,
+            },
         }
     }
 }
@@ -403,8 +410,13 @@ impl Cnrom {
             mirroring: mirror_from_header(cart.mirroring),
             bank: 0,
             // The original CNROM board is subject to AND-type bus conflicts
-            // (CNROM.md); iNES mapper 3 files in the wild expect them.
-            bus_conflicts: true,
+            // (CNROM.md); iNES mapper 3 files in the wild expect them.  NES 2.0
+            // submappers override that: 1 = no conflicts, 2 = AND-type.
+            bus_conflicts: match cart.submapper {
+                1 => false,
+                2 => true,
+                _ => true,
+            },
         }
     }
 }
