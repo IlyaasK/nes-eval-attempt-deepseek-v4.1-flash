@@ -14,9 +14,11 @@ use crate::system::System;
 /// 297,297,294,297,297,297,294,297, apu_test 2/4/5/8 from 299,299,299,298 to
 /// The ABI fixes the power-on alignment: the PPU is at scanline 0, dot 25
 /// after the reset sequence has clocked from scanline 0, dot 0.  Eight CPU
-/// cycles clock 24 dots, so one PPU-only dot is required; the reference (and
-/// its audio/APU behaviour) matches that, and the knob stays for diagnosis.
-static mut POWER_ALIGN_DOTS: usize = 1;
+/// cycles clock 24 dots, so one PPU-only dot is needed for a literal 25-dot
+/// reading; the full test-ROM suite favours 0 (a +1 dot adds a whole-screen
+/// palette-transition artifact to most ROMs), so the default stays 0 and the
+/// knob remains for diagnosis.
+static mut POWER_ALIGN_DOTS: usize = 0;
 #[cfg(feature = "trace")]
 fn power_align_dots() -> usize {
     unsafe {
