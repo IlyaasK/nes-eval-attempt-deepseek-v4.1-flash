@@ -818,6 +818,16 @@ impl System {
             if std::env::var("APU_TRACE").is_ok() && ((0x4000..=0x4017).contains(&addr)) {
                 eprintln!("A {:04X} <- {:02X} @{}", addr, val, self.cycles);
             }
+            if let Ok(v) = std::env::var("RAMWATCH") {
+                if let Some((a, b)) = v.split_once('-') {
+                    let lo = u16::from_str_radix(a, 16).unwrap_or(0);
+                    let hi = u16::from_str_radix(b, 16).unwrap_or(0);
+                    if addr >= lo && addr <= hi && !(0x2000..=0x401F).contains(&addr) {
+                        eprintln!("RAMW {:04X} <- {:02X} pc={:04X} cyc={} ppu_f={} sl={} dot={}",
+                            addr, val, self.cpu.pc, self.cycles, self.ppu.frame, self.ppu.scanline, self.ppu.dot);
+                    }
+                }
+            }
             if std::env::var("WRITE_TRACE").is_ok() && ((0x2000..=0x2007).contains(&addr) || addr == 0x4014) {
                 if addr == 0x2007 {
                     eprintln!("W 2007 <- {:02X} @{} v={:04X} mask={:02X} sl={} dot={}", val, self.cycles, self.ppu.v, self.ppu.mask, self.ppu.scanline, self.ppu.dot);
