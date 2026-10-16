@@ -475,7 +475,9 @@ pub struct Mmc3 {
     pub irq_reload: bool,
     pub irq_enabled: bool,
     pub irq_pending: bool,
+    #[cfg(feature = "trace")]
     a12_last: bool,
+    #[cfg(feature = "trace")]
     a12_prev_addr: u16,
     a12_low: bool,
     low_dots: u32,
@@ -524,7 +526,9 @@ impl Mmc3 {
             irq_reload: false,
             irq_enabled: false,
             irq_pending: false,
+            #[cfg(feature = "trace")]
             a12_last: false,
+            #[cfg(feature = "trace")]
             a12_prev_addr: 0,
             a12_low: true,
             low_dots: 0,
