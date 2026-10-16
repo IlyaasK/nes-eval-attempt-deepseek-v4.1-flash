@@ -613,3 +613,48 @@ stal 184.7/0.8646; 25000 -> 2.86, 211.8/0.9782, 183.0/0.8665; 15000 -> 4.24,
 213.2/0.9779, 181.3/0.8682; 10000 -> -, 217.6/0.9770, 181.0/0.8680.  The
 music-game gains at 25000 are ~1 rms but the transient loses 0.65 rms, so the
 default stays 40000.
+
+# Session: frame mapping verified; vblank-poll frame loss differs (open)
+
+## Verified: interface frame mapping is identical
+A probe whose NMI handler paints the backdrop from its own frame counter flips
+from $0F to $30 at exactly the same interface frame in both emulators (frame
+11).  So there is no frame-numbering offset between `emu_run_frame` and the
+reference; the "one frame ahead/behind" symptoms in test ROMs come from
+elsewhere.
+
+## Verified: NMI sampling phase 0 is correct
+Re-ran the 5/7/9/11-cycle acceptance probe with NMI_PHASE 0/1/2:
+  phase 0 -> 0 mismatches in 96 comparisons
+  phase 1 -> 4 mismatches, phase 2 -> 8 mismatches
+So the acceptance model (immediate pending, sampled at the first dot of the
+cycle) is right, and the suppression window cannot be widened by moving the
+sample point.
+
+## Open: vblank-poll frame loss (tools/framecheck.py)
+The probe runs a `bit $2002 / bpl` poll after a swept delay and paints white
+when the wait spanned more than one frame.  Reference vs mine over 5 offsets:
+  offset 0: ref ????????BBBBBB  mine same
+  offset 1: ref ????BBBBBBBBBW  mine ????BBBBBBBBBB      (ref loses a frame, we do not)
+  offset 2: ref ????BBBBBBBBBB  mine ?????BBBBBBBBB      (we lose one frame earlier)
+  offset 3: same
+  offset 4: ref ????WWWBBBBBBB  mine ?????WWBBBBBBB      (our window is one frame later/narrower)
+Sweeps of every suppression knob (VBL_SUPPRESS modes 0/1/2/3/16/17/18/19/32/48
+x VBL_DROP_SL 240/241 x VBL_DROP_DOT 336/338/340, then mode 17 with
+VBL_DROP_DOT 0 and VBL_NMI_WIN 0..12) do not reproduce the reference's
+patterns; the default (mode 1, the read one dot before the set) remains the
+best of them.  A second probe that performs a *single* controlled `bit $2002`
+at a swept delay before the next vblank set shows the same class of mismatch
+(reference paints one frame early or late where ours is constant), so the
+difference is in how a read interacts with the *pending* NMI request rather
+than in the flag/read timing itself.
+Impact: this pacing difference is what makes the three worst test ROMs
+(cpu_interrupts_v2__3 129/300, mmc3_test_2__4 73/300,
+sprite_overflow_tests__3 264/300) miss frames while their verdicts still
+match; the four games are unaffected (999/999/996/992 of 1000).
+
+## Rejected this session
+* Softening the output FIR's transition band (A_FIR_SMOOTH 1/2/3) to remove the
+  note-onset ringing: robotfindskitten rms 2.2 -> 7.0/11.5/15.2, file-fixers
+  211.9 -> 219/239/267, stallar 184.7 -> 186/195/207.  The sharp FIR is what
+  the reference has; reverted.
