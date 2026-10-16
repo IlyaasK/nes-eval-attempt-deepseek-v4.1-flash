@@ -144,6 +144,7 @@ fn first_frame_skips() -> bool {
 
 /// PPU dots to keep running after the frame boundary before returning.
 static mut FRAME_EXTRA_DOTS: usize = 0;
+
 #[cfg(feature = "trace")]
 fn frame_extra_dots() -> usize {
     unsafe {
@@ -366,6 +367,14 @@ impl System {
     }
 
     // ------------------------------------------------------------ clocking ---
+
+    /// Clock a single PPU dot without touching the CPU or APU.  Used to place
+    /// the documented power-on PPU alignment (scanline 0, dot 25).
+    #[inline]
+    pub(crate) fn clock_dot_ppu_only(&mut self) {
+        let System { ppu, mapper, .. } = self;
+        ppu.process_dot(mapper.as_mut());
+    }
 
     #[inline]
     fn clock_dot(&mut self, access: Option<Access>) -> u8 {
@@ -775,14 +784,6 @@ impl System {
         self.cpu_step();
     }
 
-    /// Advance the PPU (and the mapper) by N dots without running the CPU.
-    /// Used to place the frame boundary exactly where the reference has it.
-    fn advance_dots(&mut self, n: usize) {
-        for _ in 0..n {
-            let _ = self.clock_dot(None);
-        }
-    }
-
     pub fn run_frame(&mut self) {
         if self.first_frame {
             self.first_frame = false;
@@ -799,12 +800,11 @@ impl System {
                 break;
             }
         }
-        // The reference's frame ends slightly inside scanline 0 rather than
-        // exactly at the pre-render/scanline-0 boundary.
         for _ in 0..frame_extra_dots() {
             self.step();
         }
     }
+
 
     // -------------------------------------------------------------- audio ---
 

@@ -448,7 +448,8 @@ impl System {
         let hi = self.rd(0xFFFD) as u16;
         self.cpu.pc = (hi << 8) | lo;
         // One extra cycle of PPU/APU warm-up: this reproduces the documented
-        // power-on alignment (PPU at scanline 0, dot 25 at the first opcode fetch).
+        // power-on alignment (PPU at scanline 0, dot 25 at the first opcode
+        // fetch, counting the PPU's first dot as dot 1).
         self.idle_read(self.cpu.pc);
     }
 
