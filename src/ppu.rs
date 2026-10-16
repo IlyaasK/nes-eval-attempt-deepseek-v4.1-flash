@@ -77,20 +77,6 @@ fn attr_delay() -> bool {
 static mut VBL_SUPPRESS_MODE: u32 = 1;
 /// Dot of scanline 241 on which the vblank flag is set (the documentation's
 /// dot 1; reads on the dot before it clear and drop the flag).
-/// Dot of scanline 0 at which the frame is marked complete (diagnostic).
-static mut BOUND_DOT: u16 = 0;
-#[cfg(feature = "trace")]
-fn bound_dot() -> u16 {
-    unsafe {
-        if let Ok(v) = std::env::var("BOUND_DOT") {
-            if let Ok(n) = v.parse::<u16>() { BOUND_DOT = n; }
-        }
-        BOUND_DOT
-    }
-}
-#[cfg(not(feature = "trace"))]
-fn bound_dot() -> u16 { unsafe { BOUND_DOT } }
-
 static mut VBL_SET_DOT: u16 = 0;
 #[cfg(feature = "trace")]
 fn vbl_set_dot() -> u16 {
@@ -1632,10 +1618,8 @@ impl Ppu {
                 self.scanline = 0;
                 self.frame += 1;
                 self.odd_frame = !self.odd_frame;
-                if bound_dot() == 0 {
-                    self.frame_complete = true;
-                    self.dots_since_boundary = 0;
-                }
+                self.frame_complete = true;
+                self.dots_since_boundary = 0;
             }
         } else if self.scanline == 261
             && self.odd_frame
@@ -1649,9 +1633,6 @@ impl Ppu {
             self.odd_frame = !self.odd_frame;
             self.frame_complete = true;
             self.dots_since_boundary = 0;
-        }
-        if bound_dot() != 0 && self.scanline == 0 && self.dot == bound_dot() {
-            self.frame_complete = true;
         }
         #[cfg(feature = "trace")]
         {
