@@ -142,6 +142,18 @@ fn spr_off() -> u16 {
 #[cfg(not(feature = "trace"))]
 fn spr_off() -> u16 { unsafe { SPR_OFF } }
 
+/// Shift the background shift registers even while rendering is disabled.
+static mut SHIFT_WHEN_OFF: bool = false;
+#[cfg(feature = "trace")]
+fn shift_when_off() -> bool {
+    unsafe {
+        if let Ok(v) = std::env::var("SHIFT_WHEN_OFF") { SHIFT_WHEN_OFF = v != "0"; }
+        SHIFT_WHEN_OFF
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn shift_when_off() -> bool { unsafe { SHIFT_WHEN_OFF } }
+
 /// Dot of scanline 261 on which the odd frame's clock is skipped.
 static mut ODD_SKIP_DOT: u16 = 340;
 /// Dot of scanline 261 at which the rendering-enabled state that decides the
@@ -1099,6 +1111,9 @@ impl Ppu {
                 }
             } else {
                 // Rendering disabled: output the backdrop (or palette-RAM override).
+                if shift_when_off() && ((1..=256).contains(&dot) || (321..=336).contains(&dot)) {
+                    self.shift_registers();
+                }
                 if sl <= 239 && (1..=256).contains(&dot) {
                     let x = (dot - 1) as usize;
                     let colour = self.backdrop_colour();

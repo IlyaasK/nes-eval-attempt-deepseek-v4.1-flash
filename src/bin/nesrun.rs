@@ -112,8 +112,20 @@ fn main() {
     }
 
     let data = std::fs::read(rom_path).expect("read rom");
-    let cart = Cart::parse(&data).expect("parse rom");
-    let mapper = make_mapper(&cart).expect("mapper");
+    let cart = match Cart::parse(&data) {
+        Some(c) => c,
+        None => {
+            eprintln!("nesrun: not a valid iNES/NES 2.0 image");
+            std::process::exit(2);
+        }
+    };
+    let mapper = match make_mapper(&cart) {
+        Some(m) => m,
+        None => {
+            eprintln!("nesrun: unsupported mapper");
+            std::process::exit(2);
+        }
+    };
     let mut sys = System::new(mapper);
     sys.keys[0] = keys as u8;
 
