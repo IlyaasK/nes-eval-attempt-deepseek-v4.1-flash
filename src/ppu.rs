@@ -94,6 +94,21 @@ fn vbl_set_dot() -> u16 {
     unsafe { VBL_SET_DOT }
 }
 
+static mut PPU_DOT_LATE: bool = false;
+#[cfg(feature = "trace")]
+fn ppu_dot_late() -> bool {
+    unsafe {
+        if let Ok(v) = std::env::var("PPU_DOT_LATE") {
+            PPU_DOT_LATE = v != "0";
+        }
+        PPU_DOT_LATE
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn ppu_dot_late() -> bool {
+    unsafe { PPU_DOT_LATE }
+}
+
 /// Dot of scanline 261 on which the odd frame's clock is skipped.
 static mut ODD_SKIP_DOT: u16 = 340;
 /// Dot of scanline 261 at which the rendering-enabled state that decides the
@@ -800,13 +815,15 @@ impl Ppu {
         let sl = self.scanline;
         let dot = self.dot;
         // The mapper sees the PPU address bus on every dot (MMC3 A12 clocking).
-        if self.rendering_enabled() {
-            let a = self.bus_addr;
-            mapper.ppu_dot(a);
-        } else {
-            let a = self.v & 0x3FFF;
-            self.bus_addr = a;
-            mapper.ppu_dot(a);
+        if !ppu_dot_late() {
+            if self.rendering_enabled() {
+                let a = self.bus_addr;
+                mapper.ppu_dot(a);
+            } else {
+                let a = self.v & 0x3FFF;
+                self.bus_addr = a;
+                mapper.ppu_dot(a);
+            }
         }
 
         if sl == 241 && dot == vbl_set_dot() {
@@ -1013,6 +1030,14 @@ impl Ppu {
                     self.fb[(sl as usize) * 256 + x] = (emph << 6) | colour;
                 }
             }
+        }
+        if ppu_dot_late() {
+            let a = if self.rendering_enabled() {
+                self.bus_addr
+            } else {
+                self.v & 0x3FFF
+            };
+            mapper.ppu_dot(a);
         }
     }
 

@@ -243,66 +243,30 @@ impl System {
     // ---------------------------------------------------------- operations ---
 
     fn adc(&mut self, v: u8) {
+        // The 2A03 has no decimal mode: the D flag is stored but the ALU always
+        // adds in binary.
         let a = self.cpu.a;
         let carry = self.cpu.flag(FLAG_C) as u16;
-        if !self.cpu.flag(FLAG_D) {
-            let sum = a as u16 + v as u16 + carry;
-            let r = sum as u8;
-            self.cpu.set_flag(FLAG_C, sum > 0xFF);
-            let overflow = (!(a ^ v) & (a ^ r) & 0x80) != 0;
-            self.cpu.set_flag(FLAG_V, overflow);
-            self.cpu.a = r;
-            self.cpu.set_zn(r);
-        } else {
-            let mut sum = (a & 0x0F) as u16 + (v & 0x0F) as u16 + carry;
-            if sum > 9 {
-                sum += 6;
-            }
-            let mut hi = (a >> 4) as u16 + (v >> 4) as u16 + if sum > 0x0F { 1 } else { 0 };
-            let bin = a as u16 + v as u16 + carry;
-            let r = ((hi << 4) as u8) | ((sum & 0x0F) as u8);
-            if hi > 9 {
-                hi += 6;
-            }
-            self.cpu.set_flag(FLAG_C, bin > 0xFF);
-            let overflow = (!(a ^ v) & (a ^ ((hi << 4) as u8)) & 0x80) != 0;
-            self.cpu.set_flag(FLAG_V, overflow);
-            let r2 = ((hi << 4) as u8) | ((sum & 0x0F) as u8);
-            let _ = r;
-            self.cpu.a = r2;
-            self.cpu.set_zn(r2);
-        }
+        let sum = a as u16 + v as u16 + carry;
+        let r = sum as u8;
+        self.cpu.set_flag(FLAG_C, sum > 0xFF);
+        let overflow = (!(a ^ v) & (a ^ r) & 0x80) != 0;
+        self.cpu.set_flag(FLAG_V, overflow);
+        self.cpu.a = r;
+        self.cpu.set_zn(r);
     }
 
     fn sbc(&mut self, v: u8) {
+        // As with ADC, decimal mode does not exist on the 2A03.
         let a = self.cpu.a;
         let carry = self.cpu.flag(FLAG_C) as u16;
-        if !self.cpu.flag(FLAG_D) {
-            let diff = (a as u16).wrapping_sub(v as u16).wrapping_sub(1 - carry);
-            let r = diff as u8;
-            self.cpu.set_flag(FLAG_C, diff < 0x100);
-            let overflow = ((a ^ v) & (a ^ r) & 0x80) != 0;
-            self.cpu.set_flag(FLAG_V, overflow);
-            self.cpu.a = r;
-            self.cpu.set_zn(r);
-        } else {
-            let bin = (a as u16).wrapping_sub(v as u16).wrapping_sub(1 - carry);
-            let mut lo = (a & 0x0F) as i16 - (v & 0x0F) as i16 - (1 - carry as i16);
-            let mut hi = (a >> 4) as i16 - (v >> 4) as i16;
-            if lo < 0 {
-                lo -= 6;
-                hi -= 1;
-            }
-            if hi < 0 {
-                hi -= 6;
-            }
-            let r = (((hi << 4) as u8) & 0xF0) | ((lo as u8) & 0x0F);
-            self.cpu.set_flag(FLAG_C, bin < 0x100);
-            let overflow = ((a ^ v) & (a ^ r) & 0x80) != 0;
-            self.cpu.set_flag(FLAG_V, overflow);
-            self.cpu.a = r;
-            self.cpu.set_zn(r);
-        }
+        let diff = (a as u16).wrapping_sub(v as u16).wrapping_sub(1 - carry);
+        let r = diff as u8;
+        self.cpu.set_flag(FLAG_C, diff < 0x100);
+        let overflow = ((a ^ v) & (a ^ r) & 0x80) != 0;
+        self.cpu.set_flag(FLAG_V, overflow);
+        self.cpu.a = r;
+        self.cpu.set_zn(r);
     }
 
     fn cmp(&mut self, reg: u8, v: u8) {

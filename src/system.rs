@@ -726,7 +726,9 @@ impl System {
                                 ((self.ram[5] as u16) << 8) | self.ram[4] as u16, self.cpu.y, addr,
                                 self.mapper.prg_read(addr), self.ram[1], self.ram[0]);
                         }
-                        eprintln!("{:6} PC={:04X} A={:02X} X={:02X} Y={:02X} S={:02X} P={:02X}", self.cycles, self.cpu.pc, self.cpu.a, self.cpu.x, self.cpu.y, self.cpu.sp, self.cpu.p);
+                        eprintln!("{:6} PC={:04X} A={:02X} X={:02X} Y={:02X} S={:02X} P={:02X} op={:02X}{:02X}",
+                            self.cycles, self.cpu.pc, self.cpu.a, self.cpu.x, self.cpu.y, self.cpu.sp, self.cpu.p,
+                            self.mapper.prg_read(self.cpu.pc), self.mapper.prg_read(self.cpu.pc.wrapping_add(1)));
                     }
                 }
                 if self.hist.len() >= 96 {

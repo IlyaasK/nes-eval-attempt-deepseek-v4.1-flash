@@ -319,3 +319,22 @@ cycles of loop-cost difference flips the selected handler).
 * trace knobs TRACE_GAP (report cycle jumps > 8) and TRACE_DMA.
 * MMC1 verified against the reference with a two-bank probe (bank 0 = $2A at
   $8000, bank 1 = $15 at $C000 read back identically).
+
+## Sprite test verdicts
+All nine sprite_hit / sprite_overflow ROMs report PASSED on our emulator's
+screen (verified by decoding their text output with tools/readtext.py using
+their CHR-RAM font, dumped via --dumpvram).  Their remaining frame differences
+are: (a) the 2-pixel column at the start of row 0 on palette-change frames,
+and (b) the title line appearing one frame earlier than the reference
+(converging by ~frame 25).
+
+# MAJOR FIX: the 2A03 has no decimal mode
+`Cpu::adc`/`Cpu::sbc` implemented BCD arithmetic when the D flag was set.  The
+NES CPU stores D but the ALU is always binary.  Consequence: any ROM that runs
+with D=1 got wrong arithmetic -- e.g. `instr_timing` sets D and its delay loops
+then never terminate (`adc #$FF` no longer decrements), so the test spun
+forever in the $E440-$E462 delay routines.  With the decimal branches removed:
+
+  instr_timing: status $80, log "2-branch_timing | Passed | All 2 tests passed"
+
+Games are unchanged (199/198/196/192 of 200 frames on 200 frames).
