@@ -490,6 +490,10 @@ impl System {
             return;
         }
         if self.cpu.nmi_pending {
+            #[cfg(feature = "trace")]
+            if std::env::var("NMI_TRACE").is_ok() {
+                eprintln!("NMI take @dot={} sl={} dot={} pc={:04X}", self.ppu.total_dots, self.ppu.scanline, self.ppu.dot, self.cpu.pc);
+            }
             self.interrupt_sequence(0xFFFA, false);
             return;
         }

@@ -731,6 +731,10 @@ impl Ppu {
 
     pub fn write_register(&mut self, addr: u16, val: u8, mapper: &mut dyn Mapper, warmup: bool) {
         #[cfg(feature = "trace")]
+        if !warmup && std::env::var("NMI_TRACE").is_ok() && (addr & 7) == 0 {
+            eprintln!("$2000={:02X} @dot={} f={} sl={} dot={} vbl={}", val, self.total_dots, self.frame, self.scanline, self.dot, (self.status >> 7) & 1);
+        }
+        #[cfg(feature = "trace")]
         if !warmup && std::env::var("PPU_WLOG").is_ok() && (addr & 7) <= 7 {
             eprintln!(
                 "W {:7} f={} sl={:3} dot={:3} reg{}={:02X} v={:04X} t={:04X}",

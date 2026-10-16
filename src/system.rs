@@ -112,7 +112,7 @@ fn nmi_level_poll() -> bool {
 
 /// Extra CPU cycles of delay before an NMI edge becomes a visible request.
 /// 0 = visible immediately (same cycle), 1 = from the next cycle.
-static mut NMI_DELAY: u32 = 0;
+static mut NMI_DELAY: u32 = 1;
 #[cfg(feature = "trace")]
 fn nmi_delay_cycles() -> u32 {
     unsafe {
@@ -127,21 +127,6 @@ fn nmi_delay_cycles() -> u32 {
 #[cfg(not(feature = "trace"))]
 fn nmi_delay_cycles() -> u32 {
     unsafe { NMI_DELAY }
-}
-
-static mut NMI_PENDING_NOW: bool = false;
-#[cfg(feature = "trace")]
-fn nmi_pending_now() -> bool {
-    unsafe {
-        if let Ok(v) = std::env::var("NMI_PENDING_NOW") {
-            NMI_PENDING_NOW = v != "0";
-        }
-        NMI_PENDING_NOW
-    }
-}
-#[cfg(not(feature = "trace"))]
-fn nmi_pending_now() -> bool {
-    unsafe { NMI_PENDING_NOW }
 }
 
 /// Whether the first emu_run_frame call returns without emulating (the
@@ -201,9 +186,24 @@ fn nmi_sample_phase() -> u32 {
 /// PPU dots clocked before the CPU's bus access inside its CPU cycle.
 const ACCESS_PHASE: u32 = 2;
 
-/// Whether DMA "get" (read) cycles fall on even CPU cycles. The reference fixes
-/// this at power-on; it only affects DMA alignment cycles.
-const GET_ON_EVEN: bool = true;
+/// DMA alignment behaviour.  0 = always 513 cycles, 1 = always 514,
+/// 2 = 513/514 by the parity of the halt cycle (get on even), 3 = inverted.
+static mut DMA_ALIGN: u8 = 2;
+#[cfg(feature = "trace")]
+fn dma_align_mode() -> u8 {
+    unsafe {
+        if let Ok(v) = std::env::var("DMA_ALIGN") {
+            if let Ok(n) = v.parse::<u8>() {
+                DMA_ALIGN = n;
+            }
+        }
+        DMA_ALIGN
+    }
+}
+#[cfg(not(feature = "trace"))]
+fn dma_align_mode() -> u8 {
+    unsafe { DMA_ALIGN }
+}
 
 #[derive(Clone, Copy)]
 enum Access {
@@ -691,8 +691,13 @@ impl System {
                 // The halt happens on the next CPU cycle; if that cycle is a put
                 // cycle an alignment cycle is inserted before the first get.
                 let next = self.cycles + 1;
-                let is_get = if GET_ON_EVEN { next & 1 == 0 } else { next & 1 == 1 };
-                let dummy_cycles = 1 + if is_get { 0 } else { 1 };
+                let even = next & 1 == 0;
+                let dummy_cycles = match dma_align_mode() {
+                    0 => 1,
+                    1 => 2,
+                    2 => 1 + (!even as u32),
+                    _ => 1 + (even as u32),
+                };
                 let total = dummy_cycles + 512;
                 self.oam_dma = Some(OamDma {
                     remaining: total,
