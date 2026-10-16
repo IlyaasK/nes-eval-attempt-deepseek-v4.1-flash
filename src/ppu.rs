@@ -911,7 +911,7 @@ impl Ppu {
 
         #[cfg(feature = "trace")]
         {
-            if std::env::var("FBWATCH").is_ok() && (sl >= 255 || (sl == 0 && dot < 3)) {
+            if std::env::var("FBWATCH").is_ok() {
                 let f = std::env::var("FBWATCH").unwrap();
                 if f == format!("{}", self.frame) {
                     eprintln!("FBW f={} sl={} fb01={:04X},{:04X}", self.frame, sl, self.fb[0], self.fb[1]);
