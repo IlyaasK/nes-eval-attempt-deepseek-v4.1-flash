@@ -25,7 +25,13 @@ def build(mode: str, vol: int = 15, lo: int = 0xFD, hi: int = 0x00) -> bytes:
         e(b"\x2c\x02\x20\xd0\xfb".replace(b"\xd0", b"\x10"))  # bit $2002 / bpl
         e(b"\x2c\x02\x20\x30\xfb")               # bit $2002 / bmi
     e(b"\xa9\x40\x8d\x17\x40")                   # $4017 = $40 (4-step, IRQ off)
-    if mode == "pulse":
+    if mode == "env":
+        e(b"\xa9\x01\x8d\x15\x40")               # enable pulse 1
+        e(b"\xa9\x8f\x8d\x00\x40")               # duty 2, envelope mode, period 15
+        e(b"\xa9\x00\x8d\x01\x40")
+        e(b"\xa9\xfd\x8d\x02\x40")
+        e(b"\xa9\x00\x8d\x03\x40")
+    elif mode == "pulse":
         e(b"\xa9\x01\x8d\x15\x40")               # enable pulse 1
         e(b"\xa9" + bytes([0xB0 | (vol & 0x0F)]) + b"\x8d\x00\x40")  # duty 2, halt, const vol
         e(b"\xa9\x00\x8d\x01\x40")               # sweep off
