@@ -17,6 +17,7 @@ fn main() {
     let mut out_dir: Option<String> = None;
     let mut wav: Option<String> = None;
     let mut chdump: Option<String> = None;
+    let mut mixdump: Option<String> = None;
     let mut keys: u32 = 0;
     let mut from: u64 = 0;
     let mut bench = false;
@@ -70,7 +71,8 @@ fn main() {
                 i += 1;
             }
             "--mixdump" => {
-                i += 1;
+                mixdump = Some(args[i + 1].clone());
+                i += 2;
             }
             "--bench" => {
                 bench = true;
@@ -293,6 +295,17 @@ fn main() {
             elapsed.as_secs_f64(),
             frames as f64 / elapsed.as_secs_f64()
         );
+    }
+
+    if let Some(path) = &mixdump {
+        #[cfg(feature = "trace")]
+        {
+            let mut buf: Vec<u8> = Vec::with_capacity(sys.mix_dump.len() * 4);
+            for v in sys.mix_dump.iter() {
+                buf.extend_from_slice(&v.to_le_bytes());
+            }
+            std::fs::write(path, &buf).expect("write mixdump");
+        }
     }
 
     if let Some(path) = &chdump {
