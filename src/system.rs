@@ -613,6 +613,10 @@ impl System {
     /// A single CPU cycle without any of the DMA handling.
     #[inline]
     fn raw_cycle(&mut self, access: Option<Access>) -> u8 {
+        // The interrupt lines are polled at the end of an instruction's
+        // second-to-last cycle: sample the requests as they stand at the start
+        // of the cycle, before this cycle's own NMI edge detection.
+        self.cpu.nmi_poll = self.cpu.nmi_pending;
         let phase = nmi_sample_phase();
         let v = self.clock_dot(access);
         if phase == ACCESS_PHASE {

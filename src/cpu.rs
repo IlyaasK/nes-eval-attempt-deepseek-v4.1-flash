@@ -77,6 +77,12 @@ pub struct Cpu {
     pub irq_delay: bool,
     /// Number of cycles executed in the current instruction.
     pub instr_cycles: u32,
+    /// State of the NMI request as sampled at the start of the CPU's most
+    /// recent cycle, i.e. at the end of the cycle before it.  The 6502 polls
+    /// the interrupt lines at the end of an instruction's second-to-last
+    /// cycle, so a request raised during the last cycle is only serviced
+    /// after the following instruction.
+    pub nmi_poll: bool,
     /// Set while executing an interrupt sequence: no polling happens there.
     pub in_interrupt: bool,
     /// Last value driven on the CPU data bus (open bus behavior).
@@ -99,6 +105,7 @@ impl Cpu {
             irq_level_latched: false,
             irq_seen: false,
             irq_delay: false,
+            nmi_poll: false,
             instr_cycles: 0,
             in_interrupt: false,
             bus_latch: 0,
@@ -458,12 +465,18 @@ impl System {
         } else {
             (self.cpu.p & !FLAG_B) | FLAG_U
         };
-        self.push(pushed);
         // NMI hijacking: if the NMI line is asserted before the vector is read,
-        // the NMI vector is used instead.  `NMI_HIJACK_CYCLE` selects the poll
-        // point (0 = before the low vector read, 1 = between the two reads).
+        // the NMI vector is used instead.  The wiki's tick-by-tick breakdown
+        // puts the decision point after the PCL push and before the P push, so
+        // that is the default; `NMI_HIJACK_CYCLE` selects other poll points
+        // (0 = before the low vector read, 1 = between the two reads).
         let hijack = hijack_cycle();
         let mut vec = vector;
+        if hijack == 2 && self.cpu.nmi_pending {
+            vec = 0xFFFA;
+            self.cpu.nmi_pending = false;
+        }
+        self.push(pushed);
         if hijack == 0 && self.cpu.nmi_pending {
             vec = 0xFFFA;
             self.cpu.nmi_pending = false;
@@ -478,6 +491,10 @@ impl System {
         self.cpu.pc = (hi << 8) | lo;
         self.cpu.in_interrupt = false;
         self.cpu.irq_seen = false;
+        // Interrupt sequences do not poll, so at least one instruction of the
+        // handler runs before another interrupt is serviced: hide the request
+        // from the poll that would otherwise happen right after this sequence.
+        self.cpu.nmi_poll = false;
     }
 
     pub(crate) fn reset_sequence(&mut self) {
@@ -521,7 +538,7 @@ impl System {
             self.tick_cycle();
             return;
         }
-        if self.cpu.nmi_pending {
+        if self.cpu.nmi_poll && self.cpu.nmi_pending {
             #[cfg(feature = "trace")]
             if std::env::var("NMI_TRACE").is_ok() {
                 eprintln!("NMI take @dot={} sl={} dot={} pc={:04X}", self.ppu.total_dots, self.ppu.scanline, self.ppu.dot, self.cpu.pc);
